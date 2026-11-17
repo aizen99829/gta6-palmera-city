@@ -1,79 +1,103 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Screenshot scenes behind ?shot=start|street|mission|chase (with &seed=N).
+// Each one stages the real game — the real city, traffic, pedestrians, police
+// and missions — then lets it run forward a fixed number of steps, so the frame
+// is what a short game really looks like and the same seed always gives the
+// same frame. No scene is composited or drawn by hand.
+import { createCar, syncCarMesh } from './vehicles.js';
+import { stepTraffic, nearestCar } from './traffic.js';
+import { stepPedestrians } from './pedestrians.js';
+import { stepPolice } from './police.js';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
-
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
+function advanceWorld(ctx, seconds) {
+  const steps = Math.round(seconds * 60);
+  for (let i = 0; i < steps; i += 1) {
+    stepTraffic(ctx.traffic, 1 / 60, ctx.world, ctx.player.inCar);
+    stepPedestrians(ctx.peds, 1 / 60, ctx.rng, ctx.world, null);
   }
-  return Infinity;
 }
 
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
-  }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
+function putPlayerInCar(ctx, x, z, heading) {
+  const car = nearestCar(ctx.traffic.all, x, z, 60) || createCar(ctx.render.scene, x, z, heading, 0xc0392b, false);
+  car.driver = 'player';
+  car.parked = false;
+  car.pos.x = x;
+  car.pos.z = z;
+  car.heading = heading;
+  car.speed = 14;
+  syncCarMesh(car);
+  ctx.player.inCar = car;
+  ctx.player.pos.x = x;
+  ctx.player.pos.z = z;
+  return car;
 }
 
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
-  world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+export function stageShot(name, ctx) {
+  const { state, player } = ctx;
+  state.screen = 'play';
+  state.message = '';
+  state.messageTimer = 0;
+  if (name === 'start') {
+    state.screen = 'start';
+    player.pos.x = 0;
+    player.pos.z = 200;
+    player.camYaw = 0; // look south: sand, palms and the sea behind the menu
+    player.camPitch = 0.22;
+    ctx.missions.index = 0;
+    ctx.missions.step = 0;
+    advanceWorld(ctx, 2);
+    return { screen: 'start', announce: 'Palmera City. Press Space or click to start.' };
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
+  if (name === 'street') {
+    player.pos.x = -20;
+    player.pos.z = 0; // stand on Coral Row itself, looking east down the road
+    player.camYaw = Math.PI / 2;
+    player.camPitch = 0.3;
+    ctx.missions.index = 0;
+    ctx.missions.step = 0;
+    advanceWorld(ctx, 3);
+    return { screen: 'play', announce: 'Playing Palmera City.' };
   }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  if (name === 'mission') {
+    ctx.missions.index = 0;
+    ctx.missions.step = 1; // drive to the marina waypoint
+    putPlayerInCar(ctx, 100, 112, Math.PI / 2); // on the road, heading east toward the waypoint
+    player.camYaw = Math.PI / 2;
+    advanceWorld(ctx, 1.5);
+    state.message = 'Drive to the marina waypoint';
+    state.messageTimer = 99;
+    return { screen: 'play', announce: 'Playing Palmera City.' };
+  }
+  // chase (cover): driving fast with three cruisers on the tail, 3 stars.
+  ctx.missions.index = 2;
+  ctx.missions.step = 1; // evade — lose the cops
+  state.heat = 65;
+  const car = putPlayerInCar(ctx, 0, -56, 0);
+  car.speed = 26;
+  player.camYaw = 0;
+  const target = {
+    x: car.pos.x, z: car.pos.z, inCar: true,
+    onRam: () => {},
+  };
+  for (let i = 0; i < 3; i += 1) {
+    // Two cruisers ahead coming head-on, one on the tail: the chase reads
+    // from the driving camera, which looks where the car is going.
+    const ahead = i < 2;
+    const cz = ahead ? -56 + 50 + i * 9 : -56 - 16;
+    const cruiser = createCar(ctx.render.scene, -4 + i * 5, cz, ahead ? Math.PI : 0, 0xf2f2f2, true);
+    cruiser.driver = 'police';
+    cruiser.speed = 22;
+    ctx.police.cars.push(cruiser);
+  }
+  for (let i = 0; i < 45; i += 1) {
+    stepPolice(ctx.police, 1 / 60, ctx.render.scene, ctx.rng, target, 3, ctx.world);
+    stepTraffic(ctx.traffic, 1 / 60, ctx.world, car);
+    car.pos.z += Math.cos(car.heading) * car.speed * (1 / 60);
+    car.pos.x += Math.sin(car.heading) * car.speed * (1 / 60);
+    syncCarMesh(car);
+    target.x = car.pos.x;
+    target.z = car.pos.z;
+  }
+  state.message = 'Lose the cops — break line of sight!';
+  state.messageTimer = 99;
+  return { screen: 'play', announce: 'Playing Palmera City.' };
 }

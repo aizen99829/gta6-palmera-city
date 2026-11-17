@@ -1,61 +1,115 @@
-// Every tuning number and colour in one place. The playfield is a fixed 1280x720 logical area;
-// the renderer scales it to the window, so no rule below depends on the screen size.
-
-export const FIELD = { width: 1280, height: 720, groundY: 664 };
-
-/** The simulation's fixed step, in seconds: 60 updates a second whatever the display's rate. */
+// Palmera City — every tuning number, colour and mission script in one place.
+// The city is a road grid: roads run at multiples of PITCH; blocks sit between them.
+// +x is east, +z is south (toward the beach and the sea). Units are metres.
 export const STEP = 1 / 60;
+export const SAVE_KEY = 'palmera-city.save.v1';
+
+export const CITY = {
+  pitch: 56, // road centre to road centre
+  roadHalf: 7, // half-width of a road
+  roads: 7, // roads per axis, centred on 0: -168 .. +168
+  beachZ: 196, // sand starts here
+  seaZ: 236, // water starts here
+  size: 420, // world half-extent for fog / minimap
+};
 
 export const PLAYER = {
-  width: 72,
-  height: 24,
-  speed: 560,
-  invulnerable: 1.5,
+  walkSpeed: 6.5,
+  runSpeed: 11,
+  radius: 0.6,
+  height: 1.8,
+  maxHealth: 100,
 };
 
-export const LIVES = 3;
-
-export const BLOCK = {
-  minWidth: 40,
-  maxWidth: 110,
-  height: 36,
-  speed: 240,
-  speedPerLevel: 30,
-  speedJitter: 90,
-  interval: 0.55,
-  intervalScale: 0.88,
-  minInterval: 0.14,
-  dodgePoints: 1,
+export const CAR = {
+  accel: 22,
+  brake: 34,
+  reverseMax: 9,
+  forwardMax: 38,
+  steer: 1.9,
+  grip: 6,
 };
 
-export const COIN = {
-  size: 24,
-  speed: 190,
-  speedPerLevel: 14,
-  interval: 1.4,
-  intervalJitter: 0.8,
-  points: 10,
+export const WANTED = {
+  decayPerSec: 2.2, // heat points lost per second while unseen
+  heatPerStar: 20,
+  stealCar: 25,
+  punch: 12,
+  shoot: 30,
+  kill: 40,
+  max: 5,
 };
 
-/** Seconds of play per level, and the last level: speeds and spawn rates stop growing there. */
-export const LEVEL = { seconds: 12, max: 12 };
-
-/** How many falling things can exist at once; the pool is allocated once, at boot. */
-export const POOL_SIZE = 64;
+export const MONEY = {
+  start: 250,
+  punchLoot: 15,
+  missionReward: [400, 650, 900, 1500],
+};
 
 export const PALETTE = {
-  backdrop: '#11141b',
-  sky: '#1b1f2a',
-  ground: '#2a3040',
-  player: '#4fc3f7',
-  block: '#e5534b',
-  coin: '#f2c94c',
-  panel: '#252b38',
-  text: '#eef1f5',
-  muted: '#8b93a3',
+  sky: 0x87bfe8,
+  fog: 0xa8c8e0,
+  sun: 0xfff2d0,
+  asphalt: 0x3a3f46,
+  sidewalk: 0x9aa0a3,
+  sand: 0xe8d29a,
+  sea: 0x1e7fa8,
+  seaDeep: 0x0e5a80,
+  grass: 0x5da24a,
+  building: [0xd8c9b0, 0xc9b8a3, 0xe8dcc8, 0xb8c4c9, 0xd9a06b, 0x8fa8b8, 0xe0b8a0, 0xa8b89a],
+  glass: 0x2e4a5a,
+  palmTrunk: 0x8a6a42,
+  palmLeaf: 0x3f9e4d,
+  playerShirt: 0xff5a3c,
+  playerPants: 0x2e3a4a,
+  policeWhite: 0xf2f2f2,
+  policeBlack: 0x1a1d22,
+  carColors: [0xc0392b, 0x2e86c1, 0xf1c40f, 0x27ae60, 0x8e44ad, 0xe67e22, 0xecf0f1, 0x2c3e50, 0x16a085, 0xd35400],
 };
 
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
+// Story: Lucia "Luz" Vega, a courier fresh out of the Palmera docks, owes the
+// harbour crew a debt. Four chained jobs pay it off — if the Palmera PD lets her.
+export const MISSIONS = [
+  {
+    id: 'm1',
+    title: 'Hot Wheels',
+    giver: 'Marco at the docks',
+    story: 'Marco needs a car, fast, and he does not ask where it came from. Take any car on the street and bring it to the blue waypoint at the marina.',
+    steps: [
+      { type: 'steal', text: 'Take a car (walk up to one and press E)' },
+      { type: 'goto', pos: [150, 150], radius: 10, text: 'Drive the car to the marina waypoint' },
+    ],
+  },
+  {
+    id: 'm2',
+    title: 'Courier Run',
+    giver: 'Marco at the docks',
+    story: 'The harbour crew trusts Luz with a sealed parcel. Two drops across town, no questions, no stops for the cops.',
+    steps: [
+      { type: 'goto', pos: [-140, -140], radius: 9, text: 'Drop 1: the old hotel on Coral Row' },
+      { type: 'goto', pos: [140, -140], radius: 9, text: 'Drop 2: the rooftop bar on Sunset Ave' },
+    ],
+  },
+  {
+    id: 'm3',
+    title: 'Lose the Heat',
+    giver: 'Rosa, the fixer',
+    story: 'A drop went loud and the PD put three stars on Luz. Shake every cruiser, then lay low until the heat dies.',
+    steps: [
+      { type: 'heat', stars: 3, text: 'Get the heat up: steal a car or cause trouble (3 stars)' },
+      { type: 'evade', text: 'Lose the cops — break line of sight and stay clear until the stars fade' },
+    ],
+  },
+  {
+    id: 'm4',
+    title: 'The Last Delivery',
+    giver: 'Marco at the docks',
+    story: 'One last run and the debt is gone: the harbour master’s ledger, delivered to the lighthouse point while the whole city watches.',
+    steps: [
+      { type: 'goto', pos: [-150, 150], radius: 9, text: 'Pick up the ledger at the west docks' },
+      { type: 'goto', pos: [0, 210], radius: 9, text: 'Deliver it to the lighthouse point on the beach' },
+    ],
+  },
+];
 
-/** Where the best score is kept between visits (this browser only). */
-export const BEST_KEY = 'block-dodger.best';
+export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
