@@ -77,7 +77,7 @@ export function createHeli(scene) {
   const cone = new THREE.Mesh(
     new THREE.CylinderGeometry(0.35, 2.3, 1, 20, 1, true),
     new THREE.MeshBasicMaterial({
-      color: 0xffeeb0, transparent: true, opacity: 0.15,
+      color: 0xffeeb0, transparent: true, opacity: 0.11, // v3 R3: eased down — at 0.15 the cone washed the sea band out of the cover
       blending: THREE.AdditiveBlending, depthWrite: false,
       side: THREE.DoubleSide, fog: false,
     }),
