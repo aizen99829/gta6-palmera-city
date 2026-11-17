@@ -32,6 +32,7 @@ export function stepPolice(police, dt, scene, rng, target, wanted, world) {
   }
   let busted = false;
   for (const car of police.cars) {
+    car.t = (car.t || 0) + dt; // simulation clock for the glow pulse
     const dx = target.x - car.pos.x;
     const dz = target.z - car.pos.z;
     const dist = Math.hypot(dx, dz);

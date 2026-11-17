@@ -6,9 +6,11 @@ import { CITY, PALETTE } from './config.js';
 import { roadCentres, isOnRoad } from './world.js';
 
 // v2: pick a body style for ambient traffic (shots stage their own kinds).
+// v3 R2: a small sport share joins the fleet, so the hero kind also exists
+// in live traffic for the player to steal. Still exactly one rng draw.
 function pickKind(rng) {
   const r = rng.next();
-  return r < 0.55 ? 'sedan' : r < 0.8 ? 'hatch' : 'van';
+  return r < 0.5 ? 'sedan' : r < 0.72 ? 'hatch' : r < 0.92 ? 'van' : 'sport';
 }
 
 // Stage one moving traffic car at an exact spot (used by shots.js to put
@@ -71,6 +73,7 @@ export function stepTraffic(traffic, dt, world, playerCar) {
   const centres = roadCentres();
   const half = world.half;
   for (const car of traffic.cars) {
+    car.t = (car.t || 0) + dt; // simulation clock for the glow pulse
     // Slow for the car ahead (any car within 10 m in front).
     let ahead = false;
     for (const other of traffic.all) {

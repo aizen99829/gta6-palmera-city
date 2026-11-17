@@ -12,6 +12,7 @@ import { createCar, driveCar, carSpeedKmh } from './vehicles.js';
 import { createTraffic, stepTraffic, nearestCar } from './traffic.js';
 import { createPedestrians, stepPedestrians } from './pedestrians.js';
 import { createPolice, stepPolice } from './police.js';
+import { createHeli, stepHeli } from './heli.js';
 import { createMissions, currentMission, currentStep, missionText, stepMissions, waypointOf } from './missions.js';
 import { createCombat, tryPunch, tryShoot, stepCombat } from './combat.js';
 import { createHud } from './hud.js';
@@ -38,6 +39,7 @@ const player = createPlayer(render.scene);
 const traffic = createTraffic(render.scene, rng, world);
 const peds = createPedestrians(render.scene, rng, world);
 const police = createPolice(render.scene);
+const heli = createHeli(render.scene); // v3 R2: visual-only PD helicopter (wanted >= 3)
 const missions = createMissions();
 const combat = createCombat();
 
@@ -209,6 +211,7 @@ function step(dt) {
   const target = {
     x: player.inCar ? player.inCar.pos.x : player.pos.x,
     z: player.inCar ? player.inCar.pos.z : player.pos.z,
+    heading: player.inCar ? player.inCar.heading : player.heading,
     inCar: !!player.inCar,
     onRam: () => {
       state.health = Math.max(0, state.health - 8);
@@ -222,6 +225,9 @@ function step(dt) {
     bust();
     return;
   }
+  // The helicopter only shadows the player (searchlight theatre at 3+
+  // stars); it never touches heat, busts or damage.
+  stepHeli(heli, dt, target, stars());
   // Missions.
   const ctx = missionContext();
   const result = stepMissions(missions, ctx, dt);
@@ -269,7 +275,10 @@ function updateCamera(dt) {
     const target = { x: car.pos.x, y: 1.6, z: car.pos.z };
     render.updateCamera(target, car.heading, cam.pitch ?? 0.28, cam.dist ?? 10.5, dt, cam.offset ?? 0);
   } else {
-    const target = { x: player.pos.x, y: 1.6, z: player.pos.z };
+    // A shot may override the look-at point (tx/tz) to compose the player
+    // off-centre — the start key art needs Luz clear of the title panel,
+    // and lookAt(player) would pin her to the exact centre forever.
+    const target = { x: cam.tx ?? player.pos.x, y: 1.6, z: cam.tz ?? player.pos.z };
     render.updateCamera(target, player.camYaw, cam.pitch ?? player.camPitch, cam.dist ?? 7.5, dt, cam.offset ?? 0);
   }
 }
@@ -283,7 +292,7 @@ function hudData() {
     clockMin: state.clockMin,
     speedKmh: player.inCar ? carSpeedKmh(player.inCar) : 0,
     inCar: !!player.inCar,
-    carName: player.inCar ? (player.inCar.police ? 'Cruiser' : 'Street car') : '',
+    carName: player.inCar ? (player.inCar.police ? 'Cruiser' : player.inCar.kind === 'sport' ? 'Sport coupe' : 'Street car') : '',
     ammo: combat.ammo,
     magSize: combat.magSize,
     missionTitle: `${currentMission(missions).title} — ${currentMission(missions).giver}`,
@@ -340,19 +349,20 @@ function handleActions() {
 
 // Test hooks: the headless play-test drives the game through these.
 window.__game = {
-  state, player, missions, police, traffic, peds, combat, world,
+  state, player, missions, police, traffic, peds, combat, world, heli,
   stars, enterCar, exitCar, startGame, bust,
   shotReady: false,
 };
 
 function runShot(name) {
-  const scene = stageShot(name, { state, player, traffic, peds, police, missions, combat, world, render, rng });
+  const scene = stageShot(name, { state, player, traffic, peds, police, missions, combat, world, render, rng, heli });
   // Shots stage positions directly, so sync the player figure by hand: on
-  // foot it stands where the camera looks, in a car it is hidden, and the
-  // start screen hides it so the skyline is unobstructed.
+  // foot it stands where the camera looks, in a car it is hidden. v3 R2:
+  // the start shot is key art now — Luz stands beside her sport car, so
+  // the figure stays visible there too.
   player.mesh.position.set(player.pos.x, 0, player.pos.z);
   player.mesh.rotation.y = player.inCar ? player.inCar.heading : player.heading;
-  player.mesh.visible = name !== 'start' && !player.inCar;
+  player.mesh.visible = !player.inCar;
   updateCamera(1); // snap the chase camera to its target: a shot gets 4 paints, not 400 frames to converge
   let painted = 0;
   function paint() {

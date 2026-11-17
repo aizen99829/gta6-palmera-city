@@ -26,15 +26,18 @@ export function createRender(canvas) {
   beacon.visible = false;
   scene.add(beacon);
   const flash = new THREE.Mesh(
-    new THREE.SphereGeometry(0.35, 8, 6),
+    new THREE.SphereGeometry(0.45, 8, 6), // v3 R2: muzzle glow enlarged —
+    // at 0.35 the flash vanished at contact-sheet scale (0.62 was tried
+    // first and ballooned over Luz's head in the mission framing)
     new THREE.MeshBasicMaterial({ color: 0xfff2a0 }),
   );
   flash.visible = false;
   scene.add(flash);
   // Tracer: a bright line from the muzzle to the shot's impact point, shown
   // while the muzzle flash is up so a gunshot reads in a still frame.
+  // v3 R2: thickened 0.14 -> 0.3 for the same reason.
   const tracer = new THREE.Mesh(
-    new THREE.BoxGeometry(0.14, 0.14, 1),
+    new THREE.BoxGeometry(0.3, 0.3, 1),
     new THREE.MeshBasicMaterial({ color: 0xffe9a0 }),
   );
   tracer.visible = false;

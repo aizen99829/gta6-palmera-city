@@ -50,8 +50,8 @@ export const PALETTE = {
   sky: 0x3a2a5e, // sunset zenith purple (the sky dome texture carries the full gradient)
   fog: 0xf2a488, // pink-peach sunset haze
   sun: 0xffb36b, // low warm sunset sun
-  asphalt: 0x3a3f46,
-  sidewalk: 0x9aa0a3,
+  asphalt: 0x5a504c, // v3 R2: lighter + warmer than R1 (0x3a3f46 read as mud)
+  sidewalk: 0xc9b096, // v3 R2: warm pale kerb — road/sidewalk contrast restored
   sand: 0xe8d29a,
   sea: 0x1e7fa8,
   seaDeep: 0x0e5a80,
