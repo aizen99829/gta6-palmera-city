@@ -40,8 +40,10 @@ function putPlayerInCar(ctx, x, z, heading) {
 // palette so the street reads as busy, not cloned.
 const STAGE_COLORS = [0x2e86c1, 0xf1c40f, 0x27ae60, 0xe67e22, 0x16a085];
 
-function stageCar(ctx, n, x, z, heading, speed = 9) {
-  return spawnTrafficCar(ctx.render.scene, ctx.traffic, x, z, heading, STAGE_COLORS[n % STAGE_COLORS.length], speed);
+function stageCar(ctx, n, x, z, heading, speed = 9, kind = 'sedan') {
+  // v2: staged traffic mixes body styles, so the fleet's variety is visible
+  // in the screenshots themselves, not just in ambient spawns.
+  return spawnTrafficCar(ctx.render.scene, ctx.traffic, x, z, heading, STAGE_COLORS[n % STAGE_COLORS.length], speed, kind);
 }
 
 function stagePed(ctx, x, z, heading) {
@@ -73,9 +75,9 @@ export function stageShot(name, ctx) {
     // Parked cars at both kerbs of this road + locals on the sidewalks.
     // Staged fresh in saturated fleet colours (repositioned random parked
     // cars came out pale and unreadable here): yellow west kerb, blue east.
-    stageCar(ctx, 1, -5.5, 160, Math.PI / 2, 0);
+    stageCar(ctx, 1, -5.5, 160, Math.PI / 2, 0, 'hatch');
     stageCar(ctx, 0, 5.5, 156, -Math.PI / 2, 0);
-    stageCar(ctx, 0, -2.2, 148, Math.PI, 9); // traffic rolling away up the avenue
+    stageCar(ctx, 0, -2.2, 148, Math.PI, 9, 'van'); // traffic rolling away up the avenue
     stagePed(ctx, -8, 158.5, 0);
     stagePed(ctx, 7, 177.5, Math.PI);
     stagePed(ctx, 12, 158.5, -Math.PI / 2);
@@ -94,8 +96,8 @@ export function stageShot(name, ctx) {
     advanceWorld(ctx, 3);
     // Traffic on this same road, ahead of the player, plus a parked car at
     // the kerb she can steal.
-    stageCar(ctx, 0, 6, -2.2, Math.PI / 2, 9);
-    stageCar(ctx, 1, 32, 2.2, Math.PI / 2, 8);
+    stageCar(ctx, 0, 6, -2.2, Math.PI / 2, 9, 'van');
+    stageCar(ctx, 1, 32, 2.2, Math.PI / 2, 8, 'hatch');
     const parked = nearestCar(ctx.traffic.all, -4, 5.5, 60);
     if (parked) {
       parked.pos.x = -4;
@@ -135,7 +137,7 @@ export function stageShot(name, ctx) {
     cruiser.driver = 'police';
     cruiser.speed = 12;
     ctx.police.cars.push(cruiser);
-    stageCar(ctx, 2, 140, 109.8, Math.PI / 2, 9);
+    stageCar(ctx, 2, 140, 109.8, Math.PI / 2, 9, 'hatch');
     stagePed(ctx, 108, 121.5, Math.PI);
     stagePed(ctx, 112, 102.5, 0);
     // The shot itself: hits the cruiser, so the message, the heat and the
@@ -189,9 +191,9 @@ export function stageShot(name, ctx) {
   // Staged after the chase settles, so they sit exactly in frame: traffic
   // on this same road ahead, one cruiser tight on the player's right flank,
   // and locals on the sidewalks the chase passes.
-  stageCar(ctx, 0, -2.2, car.pos.z + 18, 0, 10);
+  stageCar(ctx, 0, -2.2, car.pos.z + 18, 0, 10, 'van');
   stageCar(ctx, 1, 2.2, car.pos.z + 30, 0, 9);
-  stageCar(ctx, 2, -2.2, car.pos.z + 44, Math.PI, 10);
+  stageCar(ctx, 2, -2.2, car.pos.z + 44, Math.PI, 10, 'hatch');
   const flank = createCar(ctx.render.scene, 5.5, car.pos.z + 4, 0, 0xf2f2f2, true);
   flank.driver = 'police';
   flank.speed = 24;

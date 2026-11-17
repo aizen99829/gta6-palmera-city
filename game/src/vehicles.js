@@ -6,36 +6,62 @@
 import * as THREE from 'three';
 import { CAR, PALETTE } from './config.js';
 
-export function makeCarMesh(color, police) {
+// v2 body styles: v1 built every car as the same sedan, so traffic was one
+// silhouette in different colours. Traffic now also comes as a shorter
+// hatchback and a tall van; the player car and the cruisers stay sedans.
+const KINDS = {
+  sedan: { len: 4.4, bodyW: 2, bodyH: 0.7, bodyY: 0.55, cabLen: 2.2, cabZ: -0.2, wheelZ: 1.4, wheelR: 0.38 },
+  hatch: { len: 3.6, bodyW: 2, bodyH: 0.7, bodyY: 0.55, cabLen: 2.4, cabZ: -0.05, wheelZ: 1.1, wheelR: 0.36 },
+  van: { len: 4.6, bodyW: 2.1, bodyH: 1.45, bodyY: 1.0, cabLen: 0, cabZ: 0, wheelZ: 1.5, wheelR: 0.45 },
+};
+
+export function makeCarMesh(color, police, kind = 'sedan') {
+  const K = KINDS[kind] || KINDS.sedan;
   const group = new THREE.Group();
   const bodyMat = new THREE.MeshLambertMaterial({ color });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2, 0.7, 4.4), bodyMat);
-  body.position.y = 0.55;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(K.bodyW, K.bodyH, K.len), bodyMat);
+  body.position.y = K.bodyY;
   group.add(body);
-  const cabin = new THREE.Mesh(
-    new THREE.BoxGeometry(1.7, 0.6, 2.2),
-    new THREE.MeshLambertMaterial({ color: police ? PALETTE.policeBlack : 0x22303c }),
-  );
-  cabin.position.set(0, 1.15, -0.2);
-  group.add(cabin);
-  // R3: the cabin read as a plain black slab on dark traffic cars. A pale
-  // roof slab + pale-blue glass front/rear give every car a two-tone
-  // glasshouse, so traffic reads as cars from behind and above, not boxes.
-  const roofSlab = new THREE.Mesh(
-    new THREE.BoxGeometry(1.74, 0.08, 2.0),
-    new THREE.MeshLambertMaterial({ color: police ? PALETTE.policeWhite : 0xe8eef2 }),
-  );
-  roofSlab.position.set(0, 1.49, -0.2);
-  group.add(roofSlab);
-  const glassMat = new THREE.MeshLambertMaterial({ color: 0x9fc8dd });
-  const shield = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 0.06), glassMat);
-  shield.position.set(0, 1.15, 0.93);
-  shield.rotation.x = -0.28;
-  group.add(shield);
-  const rearGlass = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 0.06), glassMat);
-  rearGlass.position.set(0, 1.15, -1.33);
-  rearGlass.rotation.x = 0.28;
-  group.add(rearGlass);
+  if (kind === 'van') {
+    // A van's body IS its cabin: it only needs a windshield, a side stripe
+    // and its lights to read as a van and not a crate.
+    const glassMatV = new THREE.MeshLambertMaterial({ color: 0x9fc8dd });
+    const shieldV = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.62, 0.07), glassMatV);
+    shieldV.position.set(0, 1.42, K.len / 2 - 0.02);
+    shieldV.rotation.x = -0.18;
+    group.add(shieldV);
+    const stripeV = new THREE.Mesh(
+      new THREE.BoxGeometry(K.bodyW + 0.04, 0.28, K.len - 0.7),
+      new THREE.MeshLambertMaterial({ color: 0x22303c }),
+    );
+    stripeV.position.y = 0.62;
+    group.add(stripeV);
+  } else {
+    const cabin = new THREE.Mesh(
+      new THREE.BoxGeometry(1.7, 0.6, K.cabLen),
+      new THREE.MeshLambertMaterial({ color: police ? PALETTE.policeBlack : 0x22303c }),
+    );
+    cabin.position.set(0, 1.15, K.cabZ);
+    group.add(cabin);
+    // R3: the cabin read as a plain black slab on dark traffic cars. A pale
+    // roof slab + pale-blue glass front/rear give every car a two-tone
+    // glasshouse, so traffic reads as cars from behind and above, not boxes.
+    const roofSlab = new THREE.Mesh(
+      new THREE.BoxGeometry(1.74, 0.08, K.cabLen - 0.2),
+      new THREE.MeshLambertMaterial({ color: police ? PALETTE.policeWhite : 0xe8eef2 }),
+    );
+    roofSlab.position.set(0, 1.49, K.cabZ);
+    group.add(roofSlab);
+    const glassMat = new THREE.MeshLambertMaterial({ color: 0x9fc8dd });
+    const shield = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 0.06), glassMat);
+    shield.position.set(0, 1.15, K.cabZ + K.cabLen / 2 + 0.03);
+    shield.rotation.x = -0.28;
+    group.add(shield);
+    const rearGlass = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 0.06), glassMat);
+    rearGlass.position.set(0, 1.15, K.cabZ - K.cabLen / 2 - 0.03);
+    rearGlass.rotation.x = 0.28;
+    group.add(rearGlass);
+  }
   if (police) {
     const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.02, 0.25, 4.42), new THREE.MeshLambertMaterial({ color: PALETTE.policeBlack }));
     stripe.position.y = 0.62;
@@ -60,13 +86,16 @@ export function makeCarMesh(color, police) {
     hood.position.set(0, 0.92, 1.65);
     group.add(hood);
   }
-  const wheelGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.3, 10);
+  const wheelGeo = new THREE.CylinderGeometry(K.wheelR, K.wheelR, 0.3, 10);
   const wheelMat = new THREE.MeshLambertMaterial({ color: 0x141414 });
+  // (Hubcap discs were tried in R2 and cut the same round: +4 draw calls
+  // per car for a detail invisible beyond a few metres — the perf probe
+  // priced them, the screenshots couldn't show them.)
   const wheels = [];
-  for (const [wx, wz] of [[-0.95, 1.4], [0.95, 1.4], [-0.95, -1.4], [0.95, -1.4]]) {
+  for (const [wx, wz] of [[-0.95, K.wheelZ], [0.95, K.wheelZ], [-0.95, -K.wheelZ], [0.95, -K.wheelZ]]) {
     const w = new THREE.Mesh(wheelGeo, wheelMat);
     w.rotation.z = Math.PI / 2;
-    w.position.set(wx, 0.38, wz);
+    w.position.set(wx, K.wheelR, wz);
     group.add(w);
     wheels.push(w);
   }
@@ -74,24 +103,24 @@ export function makeCarMesh(color, police) {
   // road instead of floating on it. (A real shadow map was measured and
   // rejected: −46%/−61% FPS in swiftshader — see world.js.)
   const blob = new THREE.Mesh(
-    new THREE.PlaneGeometry(2.7, 5.0),
+    new THREE.PlaneGeometry(2.7, K.len + 0.6),
     new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false }),
   );
   blob.rotation.x = -Math.PI / 2;
   blob.position.y = 0.12;
   group.add(blob);
   const head = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.18, 0.2), new THREE.MeshBasicMaterial({ color: 0xfff6c8 }));
-  head.position.set(0, 0.6, 2.22);
+  head.position.set(0, 0.6, K.len / 2 + 0.02);
   group.add(head);
   // Taillights mirror the headlights.
   const tail = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.16, 0.1), new THREE.MeshBasicMaterial({ color: 0xcc2222 }));
-  tail.position.set(0, 0.6, -2.22);
+  tail.position.set(0, 0.6, -K.len / 2 - 0.02);
   group.add(tail);
   return { group, wheels };
 }
 
-export function createCar(scene, x, z, heading, color, police) {
-  const { group, wheels } = makeCarMesh(color, police);
+export function createCar(scene, x, z, heading, color, police, kind = 'sedan') {
+  const { group, wheels } = makeCarMesh(color, police, kind);
   group.position.set(x, 0, z);
   group.rotation.y = heading;
   scene.add(group);
@@ -102,6 +131,7 @@ export function createCar(scene, x, z, heading, color, police) {
     heading,
     speed: 0,
     color,
+    kind,
     police: !!police,
     parked: false,
     driver: null, // 'player' | 'traffic' | 'police' | null

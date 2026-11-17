@@ -5,10 +5,16 @@ import { createCar, syncCarMesh } from './vehicles.js';
 import { CITY, PALETTE } from './config.js';
 import { roadCentres, isOnRoad } from './world.js';
 
+// v2: pick a body style for ambient traffic (shots stage their own kinds).
+function pickKind(rng) {
+  const r = rng.next();
+  return r < 0.55 ? 'sedan' : r < 0.8 ? 'hatch' : 'van';
+}
+
 // Stage one moving traffic car at an exact spot (used by shots.js to put
 // traffic in frame). Deterministic: colour/speed come from the caller.
-export function spawnTrafficCar(scene, traffic, x, z, heading, color, speed) {
-  const car = createCar(scene, x, z, heading, color, false);
+export function spawnTrafficCar(scene, traffic, x, z, heading, color, speed, kind = 'sedan') {
+  const car = createCar(scene, x, z, heading, color, false, kind);
   car.driver = 'traffic';
   car.speed = speed;
   car.cruise = speed;
@@ -34,7 +40,7 @@ export function createTraffic(scene, rng, world) {
     const x = horizontal ? along : road + lane;
     const z = horizontal ? road + lane : along;
     const heading = horizontal ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : dir > 0 ? 0 : Math.PI;
-    const car = createCar(scene, x, z, heading, rng.pick(PALETTE.carColors), false);
+    const car = createCar(scene, x, z, heading, rng.pick(PALETTE.carColors), false, pickKind(rng));
     car.driver = 'traffic';
     car.speed = rng.range(7, 12);
     car.cruise = car.speed;
@@ -53,7 +59,7 @@ export function createTraffic(scene, rng, world) {
     const x = horizontal ? along : road + side * (CITY.roadHalf - 1.5);
     const z = horizontal ? road + side * (CITY.roadHalf - 1.5) : along;
     const heading = horizontal ? (side > 0 ? Math.PI / 2 : -Math.PI / 2) : side > 0 ? 0 : Math.PI;
-    const car = createCar(scene, x, z, heading, rng.pick(PALETTE.carColors), false);
+    const car = createCar(scene, x, z, heading, rng.pick(PALETTE.carColors), false, pickKind(rng));
     car.parked = true;
     car.driver = null;
     parked.push(car);

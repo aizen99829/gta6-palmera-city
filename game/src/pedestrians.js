@@ -7,9 +7,13 @@ import { roadCentres } from './world.js';
 
 const SHIRTS = [0x4a90d9, 0xe67e22, 0x9b59b6, 0x1abc9c, 0xf39c12, 0xecf0f1, 0x34495e, 0xe74c3c];
 const SKINS = [0xc98a5e, 0x8a5a3b, 0xe8b98a];
+const PANTS = [0x2e3a4a, 0x5a4632, 0x707a84, 0x384048, 0x7a3b2e];
+const HAIR = [0x1a1210, 0x3a2415, 0x6a4a2a, 0xb8b0a4];
 const BODY_GEO = new THREE.BoxGeometry(0.6, 0.9, 0.35);
 const HEAD_GEO = new THREE.SphereGeometry(0.24, 10, 8);
 const LEG_GEO = new THREE.BoxGeometry(0.22, 0.7, 0.26);
+const ARM_GEO = new THREE.BoxGeometry(0.18, 0.65, 0.22);
+const HAIR_GEO = new THREE.SphereGeometry(0.25, 10, 8, 0, Math.PI * 2, 0, Math.PI / 2);
 
 // Stage one pedestrian at an exact spot (used by shots.js to cluster locals
 // near the player). Deterministic: shirt/skin come from the caller's rng.
@@ -22,12 +26,30 @@ export function spawnPed(scene, rng, x, z, heading) {
   const head = new THREE.Mesh(HEAD_GEO, new THREE.MeshLambertMaterial({ color: rng.pick(SKINS) }));
   head.position.y = 1.7;
   group.add(head);
-  const legL = new THREE.Mesh(LEG_GEO, new THREE.MeshLambertMaterial({ color: 0x2e3a4a }));
+  // v2: most locals get hair (the player figure has it too) — a bare sphere
+  // head on every ped read as a peg at contact-sheet scale.
+  if (rng.next() < 0.7) {
+    const hair = new THREE.Mesh(HAIR_GEO, new THREE.MeshLambertMaterial({ color: rng.pick(HAIR) }));
+    hair.position.y = 1.73;
+    group.add(hair);
+  }
+  const pantsMat = new THREE.MeshLambertMaterial({ color: rng.pick(PANTS) });
+  const legL = new THREE.Mesh(LEG_GEO, pantsMat);
   legL.position.set(-0.15, 0.35, 0);
   group.add(legL);
-  const legR = new THREE.Mesh(LEG_GEO, new THREE.MeshLambertMaterial({ color: 0x2e3a4a }));
+  const legR = new THREE.Mesh(LEG_GEO, pantsMat);
   legR.position.set(0.15, 0.35, 0);
   group.add(legR);
+  // v2: arms that swing against the legs (the player figure already had
+  // them; armless peds were the "capsule" read the R3 review flagged).
+  const armL = new THREE.Mesh(ARM_GEO, shirt);
+  armL.position.set(-0.42, 1.12, 0);
+  group.add(armL);
+  const armR = new THREE.Mesh(ARM_GEO, shirt);
+  armR.position.set(0.42, 1.12, 0);
+  group.add(armR);
+  // v2: locals are not all the same height.
+  group.scale.setScalar(rng.range(0.92, 1.08));
   group.position.set(x, 0, z);
   group.rotation.y = heading;
   scene.add(group);
@@ -42,7 +64,7 @@ export function spawnPed(scene, rng, x, z, heading) {
   blob.position.set(x, 0.12, z);
   scene.add(blob);
   return {
-    mesh: group, legL, legR, blob,
+    mesh: group, legL, legR, armL, armR, blob,
     pos: { x, z },
     heading,
     speed: rng.range(0.8, 1.6),
@@ -114,6 +136,10 @@ export function stepPedestrians(peds, dt, rng, world, threat) {
     }
     ped.legL.rotation.x = Math.sin(ped.phase) * 0.5;
     ped.legR.rotation.x = -Math.sin(ped.phase) * 0.5;
+    if (ped.armL && ped.armR) {
+      ped.armL.rotation.x = -Math.sin(ped.phase) * 0.45;
+      ped.armR.rotation.x = Math.sin(ped.phase) * 0.45;
+    }
     ped.mesh.position.set(ped.pos.x, 0, ped.pos.z);
     ped.mesh.rotation.y = ped.heading;
     if (ped.blob) ped.blob.position.set(ped.pos.x, 0.12, ped.pos.z);
