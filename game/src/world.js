@@ -29,7 +29,11 @@ function windowTexture(rng) {
   // contact-sheet scale, two read as windows.
   for (const x of [8, 37]) {
     const r = rng.next();
-    g.fillStyle = r < 0.35 ? '#ffe9a8' : r < 0.75 ? '#2e4a5a' : '#5a7a8a';
+    // v3 sunset grade: ~25% of windows are lit warm (kuning-oranye terang) —
+    // the city reads as lived-in at dusk; the rest are dark glass or glass
+    // catching the pink sky. Same seeded rng, so the pattern is stable.
+    if (r < 0.25) g.fillStyle = rng.pick(['#ffd76a', '#ffb347', '#ffe9a8']);
+    else g.fillStyle = r < 0.65 ? '#2e4a5a' : '#5a7a8a';
     g.fillRect(x, 13, 17, 27);
   }
   // Floor line under the row of windows.
@@ -39,6 +43,66 @@ function windowTexture(rng) {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.wrapS = THREE.RepeatWrapping;
   tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+// v3 sunset sky dome texture: a vertical canvas gradient mapped on the
+// inside of a big sphere. Canvas top (v=1) is the zenith, canvas middle
+// (v=0.5) is the horizon line, so the orange band sits exactly at y≈256.
+function skyTexture() {
+  const c = document.createElement('canvas');
+  c.width = 4;
+  c.height = 512;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0, '#3a2a5e'); // zenith purple
+  grad.addColorStop(0.3, '#6a3a7e');
+  grad.addColorStop(0.42, '#e86a92'); // pink band
+  grad.addColorStop(0.48, '#ff9a5c');
+  grad.addColorStop(0.5, '#ffb347'); // horizon orange
+  grad.addColorStop(0.56, '#e88a5c'); // below the horizon (mostly hidden)
+  grad.addColorStop(1, '#7a4a5e');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 4, 512);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// v3 sea texture: a vertical gradient on the sea plane. Canvas top maps to
+// the shoreline edge (deep teal), canvas bottom to the far southern edge,
+// where a pink→orange band fakes the sunset reflection near the horizon.
+function seaTexture() {
+  const c = document.createElement('canvas');
+  c.width = 16;
+  c.height = 256;
+  const g = c.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, '#14688c'); // shore: deep teal
+  grad.addColorStop(0.55, '#1e7fa8');
+  grad.addColorStop(0.85, '#e86a92'); // pink reflection
+  grad.addColorStop(1, '#ffb347'); // warm band at the horizon
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 16, 256);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// Soft radial glow sprite texture (sun halo) — additive, fades to nothing.
+function glowTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  grad.addColorStop(0, 'rgba(255,190,110,0.85)');
+  grad.addColorStop(0.35, 'rgba(255,150,90,0.35)');
+  grad.addColorStop(1, 'rgba(255,140,90,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 128, 128);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
 }
 
@@ -109,11 +173,35 @@ export function createWorld(scene, rng) {
   sand.position.set(0, 0.05, CITY.beachZ + 20);
   group.add(sand);
 
-  const seaMat = new THREE.MeshLambertMaterial({ color: PALETTE.sea, transparent: true, opacity: 0.92 });
+  // v3: the sea wears the sunset gradient texture (deep teal at the shore,
+  // warm band at the horizon) instead of one flat colour.
+  const seaMat = new THREE.MeshLambertMaterial({ map: seaTexture(), transparent: true, opacity: 0.92 });
   const sea = new THREE.Mesh(new THREE.PlaneGeometry(CITY.size * 2, 300), seaMat);
   sea.rotation.x = -Math.PI / 2;
   sea.position.set(0, 0.02, CITY.seaZ + 130);
   group.add(sea);
+
+  // v3 sun glitter: two thin additive strips on the water, aligned with the
+  // sun's azimuth (the disc sits low over the southern sea at x≈+70), so the
+  // sunset throws a warm path across the water toward the beach.
+  const glitterMat = new THREE.MeshBasicMaterial({
+    color: 0xffc46a, transparent: true, opacity: 0.15,
+    blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+  });
+  const glitter = new THREE.Mesh(new THREE.PlaneGeometry(52, 280), glitterMat);
+  glitter.rotation.x = -Math.PI / 2;
+  glitter.position.set(70, 0.14, CITY.seaZ + 120);
+  group.add(glitter);
+  const glitterCore = new THREE.Mesh(
+    new THREE.PlaneGeometry(17, 280),
+    new THREE.MeshBasicMaterial({
+      color: 0xffd98f, transparent: true, opacity: 0.2,
+      blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+    }),
+  );
+  glitterCore.rotation.x = -Math.PI / 2;
+  glitterCore.position.set(70, 0.15, CITY.seaZ + 120);
+  group.add(glitterCore);
 
   // v2 shoreline: a band of darker wet sand where the water meets the
   // beach, and a wavy foam line on top of it. v1's sand simply stopped at
@@ -404,7 +492,7 @@ export function createWorld(scene, rng) {
   // in the driving shots is not one flat colour. fog:false — at their
   // distance the city haze would erase them entirely.
   const cloudMat = new THREE.MeshBasicMaterial({
-    color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false,
+    color: 0xffc9d6, transparent: true, opacity: 0.45, depthWrite: false,
     side: THREE.DoubleSide, fog: false,
   });
   for (let i = 0; i < 8; i += 1) {
@@ -417,16 +505,41 @@ export function createWorld(scene, rng) {
     group.add(cloud);
   }
 
-  // Sun, sky and haze — a low golden sun, warm bounce light. v2 adds a
-  // hemisphere light (sky above, sand below) and trims the flat ambient, so
-  // shaded facades keep a cool/warm split instead of one flat tone.
-  const sun = new THREE.DirectionalLight(PALETTE.sun, 2.7);
-  sun.position.set(120, 180, 60);
+  // v3 sunset sky: a gradient dome replaces the flat background colour, and
+  // a bright sun disc + additive halo sit low over the southern sea (+z),
+  // on the same azimuth as the glitter path on the water. fog:false on all
+  // three materials — at dome distance the haze would erase them.
+  const skyDome = new THREE.Mesh(
+    new THREE.SphereGeometry(900, 24, 16),
+    new THREE.MeshBasicMaterial({ map: skyTexture(), side: THREE.BackSide, fog: false }),
+  );
+  group.add(skyDome);
+  const sunDisc = new THREE.Mesh(
+    new THREE.CircleGeometry(22, 24),
+    new THREE.MeshBasicMaterial({ color: 0xfff3c4, fog: false }),
+  );
+  sunDisc.position.set(70, 24, 440);
+  sunDisc.lookAt(0, 24, 0);
+  group.add(sunDisc);
+  const sunHalo = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(), blending: THREE.AdditiveBlending,
+    transparent: true, depthWrite: false, fog: false,
+  }));
+  sunHalo.position.set(70, 24, 438);
+  sunHalo.scale.set(190, 190, 1);
+  group.add(sunHalo);
+
+  // Sun, light and haze — v3 sunset grade: the directional sun is warmer
+  // and dominant, the flat ambient is trimmed down, and the hemisphere
+  // light carries the pink sky / warm sand split, so shaded facades read
+  // as dusk instead of flat grey. Fog is warmer and closer, layering the
+  // city into sunset depth.
+  const sun = new THREE.DirectionalLight(PALETTE.sun, 3.0);
+  sun.position.set(80, 110, 190);
   scene.add(sun);
-  scene.add(new THREE.AmbientLight(0xffe2b8, 0.72));
-  scene.add(new THREE.HemisphereLight(0xbfd9e8, 0xe8d29a, 0.55));
-  scene.background = new THREE.Color(PALETTE.sky);
-  scene.fog = new THREE.Fog(PALETTE.fog, 180, 520);
+  scene.add(new THREE.AmbientLight(0xffb59a, 0.38));
+  scene.add(new THREE.HemisphereLight(0xf2a0b8, 0xcf9a62, 0.65));
+  scene.fog = new THREE.Fog(PALETTE.fog, 150, 430);
 
   return {
     group,

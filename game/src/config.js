@@ -47,9 +47,9 @@ export const MONEY = {
 };
 
 export const PALETTE = {
-  sky: 0x8ec8e8,
-  fog: 0xd8c8a8, // warm coastal haze, not cold blue
-  sun: 0xffdf9e, // low golden sun
+  sky: 0x3a2a5e, // sunset zenith purple (the sky dome texture carries the full gradient)
+  fog: 0xf2a488, // pink-peach sunset haze
+  sun: 0xffb36b, // low warm sunset sun
   asphalt: 0x3a3f46,
   sidewalk: 0x9aa0a3,
   sand: 0xe8d29a,
