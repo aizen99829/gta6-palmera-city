@@ -47,9 +47,9 @@ export const MONEY = {
 };
 
 export const PALETTE = {
-  sky: 0x87bfe8,
-  fog: 0xa8c8e0,
-  sun: 0xfff2d0,
+  sky: 0x8ec8e8,
+  fog: 0xd8c8a8, // warm coastal haze, not cold blue
+  sun: 0xffdf9e, // low golden sun
   asphalt: 0x3a3f46,
   sidewalk: 0x9aa0a3,
   sand: 0xe8d29a,
@@ -57,6 +57,7 @@ export const PALETTE = {
   seaDeep: 0x0e5a80,
   grass: 0x5da24a,
   building: [0xd8c9b0, 0xc9b8a3, 0xe8dcc8, 0xb8c4c9, 0xd9a06b, 0x8fa8b8, 0xe0b8a0, 0xa8b89a],
+  roofs: [0x6a5a48, 0x8a4a3a, 0x4a5a6a, 0x7a6a4a, 0x5a4a3a, 0x9a3a2a],
   glass: 0x2e4a5a,
   palmTrunk: 0x8a6a42,
   palmLeaf: 0x3f9e4d,

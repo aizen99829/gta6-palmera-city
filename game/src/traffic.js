@@ -5,6 +5,21 @@ import { createCar, syncCarMesh } from './vehicles.js';
 import { CITY, PALETTE } from './config.js';
 import { roadCentres, isOnRoad } from './world.js';
 
+// Stage one moving traffic car at an exact spot (used by shots.js to put
+// traffic in frame). Deterministic: colour/speed come from the caller.
+export function spawnTrafficCar(scene, traffic, x, z, heading, color, speed) {
+  const car = createCar(scene, x, z, heading, color, false);
+  car.driver = 'traffic';
+  car.speed = speed;
+  car.cruise = speed;
+  car.horizontal = Math.abs(Math.sin(heading)) > 0.7;
+  car.road = car.horizontal ? z : x;
+  car.dir = 1;
+  traffic.cars.push(car);
+  traffic.all.push(car);
+  return car;
+}
+
 export function createTraffic(scene, rng, world) {
   const centres = roadCentres();
   const cars = [];

@@ -6,7 +6,7 @@ import { nearestPed } from './pedestrians.js';
 import { MONEY, WANTED } from './config.js';
 
 export function createCombat() {
-  return { ammo: 12, magSize: 12, reloadTimer: 0, flash: 0, lastShot: '' };
+  return { ammo: 12, magSize: 12, reloadTimer: 0, flash: 0, lastShot: '', tracerFrom: null, tracerTo: null };
 }
 
 export function tryPunch(combat, player, peds, state) {
@@ -64,6 +64,12 @@ export function tryShoot(combat, origin, dir, peds, policeCars, state) {
   } else {
     state.heat = Math.min(100, state.heat + 4);
   }
+  // Tracer: muzzle to the hit (or 30 m downrange on a miss), so the shot
+  // reads in a still frame, not just while the flash is up.
+  combat.tracerFrom = { x: origin.x + dir.x * 1.2, y: 1.4, z: origin.z + dir.z * 1.2 };
+  combat.tracerTo = best
+    ? { x: best.pos.x, y: 1.2, z: best.pos.z }
+    : { x: origin.x + dir.x * 30, y: 1.2, z: origin.z + dir.z * 30 };
   if (combat.ammo === 0) {
     combat.reloadTimer = 1.4;
     combat.ammo = combat.magSize;

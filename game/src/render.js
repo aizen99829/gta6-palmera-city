@@ -26,11 +26,19 @@ export function createRender(canvas) {
   beacon.visible = false;
   scene.add(beacon);
   const flash = new THREE.Mesh(
-    new THREE.SphereGeometry(0.6, 8, 6),
+    new THREE.SphereGeometry(0.35, 8, 6),
     new THREE.MeshBasicMaterial({ color: 0xfff2a0 }),
   );
   flash.visible = false;
   scene.add(flash);
+  // Tracer: a bright line from the muzzle to the shot's impact point, shown
+  // while the muzzle flash is up so a gunshot reads in a still frame.
+  const tracer = new THREE.Mesh(
+    new THREE.BoxGeometry(0.14, 0.14, 1),
+    new THREE.MeshBasicMaterial({ color: 0xffe9a0 }),
+  );
+  tracer.visible = false;
+  scene.add(tracer);
 
   function resize() {
     const w = window.innerWidth;
@@ -47,9 +55,11 @@ export function createRender(canvas) {
     renderer,
     scene,
     camera,
-    updateCamera(target, yaw, pitch, dist, dt) {
-      const cx = target.x - Math.sin(yaw) * Math.cos(pitch) * dist;
-      const cz = target.z - Math.cos(yaw) * Math.cos(pitch) * dist;
+    // offset shifts the camera sideways (perpendicular to the view) so a
+    // shot can favour one side of the street and dodge a flanking wall.
+    updateCamera(target, yaw, pitch, dist, dt, offset = 0) {
+      const cx = target.x - Math.sin(yaw) * Math.cos(pitch) * dist + Math.cos(yaw) * offset;
+      const cz = target.z - Math.cos(yaw) * Math.cos(pitch) * dist - Math.sin(yaw) * offset;
       const cy = target.y + Math.sin(pitch) * dist + 1.2;
       const want = new THREE.Vector3(cx, Math.max(1.2, cy), cz);
       camPos.lerp(want, Math.min(1, dt * 6));
@@ -75,6 +85,20 @@ export function createRender(canvas) {
       }
       flash.visible = true;
       flash.position.set(pos.x, pos.y, pos.z);
+    },
+    setTracer(from, to) {
+      if (!from || !to) {
+        tracer.visible = false;
+        return;
+      }
+      tracer.visible = true;
+      const dx = to.x - from.x;
+      const dy = (to.y ?? 1.2) - (from.y ?? 1.4);
+      const dz = to.z - from.z;
+      const len = Math.hypot(dx, dy, dz);
+      tracer.position.set((from.x + to.x) / 2, ((from.y ?? 1.4) + (to.y ?? 1.2)) / 2, (from.z + to.z) / 2);
+      tracer.lookAt(to.x, to.y ?? 1.2, to.z);
+      tracer.scale.set(1, 1, Math.max(0.1, len));
     },
     draw() {
       renderer.render(scene, camera);

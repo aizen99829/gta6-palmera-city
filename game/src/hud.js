@@ -54,6 +54,9 @@ export function createHud() {
       <div style="margin-top:20px;font-size:20px;font-weight:700;color:#ffd94a;">Press SPACE or click to start</div>
       <div style="margin-top:8px;font-size:13px;color:#9fb6c8;">Progress saves automatically to this browser.</div>
     </div>`);
+  // The start screen must show the city, not hide it: a light gradient veil
+  // instead of the near-opaque dark wash the pause/busted screens use.
+  startScreen.style.background = 'linear-gradient(180deg, rgba(8,18,28,.28) 0%, rgba(8,18,28,.38) 55%, rgba(8,18,28,.55) 100%)';
   const pauseScreen = overlay('screen-pause', `
     <div style="text-align:center;">
       <div style="font-size:44px;font-weight:900;">PAUSED</div>
@@ -92,10 +95,14 @@ export function createHud() {
       ctx.beginPath(); ctx.moveTo(toX(c), 0); ctx.lineTo(toX(c), H); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, toY(c)); ctx.lineTo(W, toY(c)); ctx.stroke();
     }
-    // Waypoint diamond.
+    // Waypoint diamond (large, with a white ring so it reads at a glance).
     if (data.waypoint) {
       const wx = toX(data.waypoint.x);
       const wy = toY(data.waypoint.z);
+      ctx.fillStyle = '#fff';
+      ctx.beginPath();
+      ctx.moveTo(wx, wy - 12); ctx.lineTo(wx + 10, wy); ctx.lineTo(wx, wy + 12); ctx.lineTo(wx - 10, wy);
+      ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#ffd94a';
       ctx.beginPath();
       ctx.moveTo(wx, wy - 8); ctx.lineTo(wx + 7, wy); ctx.lineTo(wx, wy + 8); ctx.lineTo(wx - 7, wy);

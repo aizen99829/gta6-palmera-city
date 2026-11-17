@@ -6,28 +6,48 @@ import { CITY } from './config.js';
 import { roadCentres } from './world.js';
 
 const SHIRTS = [0x4a90d9, 0xe67e22, 0x9b59b6, 0x1abc9c, 0xf39c12, 0xecf0f1, 0x34495e, 0xe74c3c];
+const SKINS = [0xc98a5e, 0x8a5a3b, 0xe8b98a];
+const BODY_GEO = new THREE.BoxGeometry(0.6, 0.9, 0.35);
+const HEAD_GEO = new THREE.SphereGeometry(0.24, 10, 8);
+const LEG_GEO = new THREE.BoxGeometry(0.22, 0.7, 0.26);
+
+// Stage one pedestrian at an exact spot (used by shots.js to cluster locals
+// near the player). Deterministic: shirt/skin come from the caller's rng.
+export function spawnPed(scene, rng, x, z, heading) {
+  const group = new THREE.Group();
+  const shirt = new THREE.MeshLambertMaterial({ color: rng.pick(SHIRTS) });
+  const torso = new THREE.Mesh(BODY_GEO, shirt);
+  torso.position.y = 1.1;
+  group.add(torso);
+  const head = new THREE.Mesh(HEAD_GEO, new THREE.MeshLambertMaterial({ color: rng.pick(SKINS) }));
+  head.position.y = 1.7;
+  group.add(head);
+  const legL = new THREE.Mesh(LEG_GEO, new THREE.MeshLambertMaterial({ color: 0x2e3a4a }));
+  legL.position.set(-0.15, 0.35, 0);
+  group.add(legL);
+  const legR = new THREE.Mesh(LEG_GEO, new THREE.MeshLambertMaterial({ color: 0x2e3a4a }));
+  legR.position.set(0.15, 0.35, 0);
+  group.add(legR);
+  group.position.set(x, 0, z);
+  group.rotation.y = heading;
+  scene.add(group);
+  return {
+    mesh: group, legL, legR,
+    pos: { x, z },
+    heading,
+    speed: rng.range(0.8, 1.6),
+    target: null,
+    down: 0,
+    flee: 0,
+    phase: rng.range(0, 6),
+    horizontal: true,
+  };
+}
 
 export function createPedestrians(scene, rng, world) {
   const centres = roadCentres();
   const peds = [];
-  const bodyGeo = new THREE.BoxGeometry(0.6, 0.9, 0.35);
-  const headGeo = new THREE.SphereGeometry(0.24, 10, 8);
-  const legGeo = new THREE.BoxGeometry(0.22, 0.7, 0.26);
   for (let i = 0; i < 22; i += 1) {
-    const group = new THREE.Group();
-    const shirt = new THREE.MeshLambertMaterial({ color: rng.pick(SHIRTS) });
-    const torso = new THREE.Mesh(bodyGeo, shirt);
-    torso.position.y = 1.1;
-    group.add(torso);
-    const head = new THREE.Mesh(headGeo, new THREE.MeshLambertMaterial({ color: rng.pick([0xc98a5e, 0x8a5a3b, 0xe8b98a]) }));
-    head.position.y = 1.7;
-    group.add(head);
-    const legL = new THREE.Mesh(legGeo, new THREE.MeshLambertMaterial({ color: 0x2e3a4a }));
-    legL.position.set(-0.15, 0.35, 0);
-    group.add(legL);
-    const legR = new THREE.Mesh(legGeo, new THREE.MeshLambertMaterial({ color: 0x2e3a4a }));
-    legR.position.set(0.15, 0.35, 0);
-    group.add(legR);
     // Sidewalk spot: just off a road centreline.
     const horizontal = rng.next() < 0.5;
     const road = rng.pick(centres);
@@ -35,19 +55,9 @@ export function createPedestrians(scene, rng, world) {
     const side = rng.next() < 0.5 ? -1 : 1;
     const x = horizontal ? along : road + side * (CITY.roadHalf + 2.5);
     const z = horizontal ? road + side * (CITY.roadHalf + 2.5) : along;
-    group.position.set(x, 0, z);
-    scene.add(group);
-    peds.push({
-      mesh: group, legL, legR,
-      pos: { x, z },
-      heading: rng.range(0, Math.PI * 2),
-      speed: rng.range(0.8, 1.6),
-      target: null,
-      down: 0,
-      flee: 0,
-      phase: rng.range(0, 6),
-      horizontal,
-    });
+    const ped = spawnPed(scene, rng, x, z, rng.range(0, Math.PI * 2));
+    ped.horizontal = horizontal;
+    peds.push(ped);
   }
   return peds;
 }

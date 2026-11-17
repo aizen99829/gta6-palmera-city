@@ -7,13 +7,16 @@
 import * as THREE from 'three';
 import { CITY, PALETTE } from './config.js';
 
+const FACADE_WALLS = ['#d8c9b0', '#e0b890', '#c9b8a3', '#b8c4c9'];
+
 function windowTexture(rng) {
-  // One shared facade texture: lit windows on a warm wall, drawn once on canvas.
+  // One shared facade texture per wall tone: lit windows on a warm wall,
+  // drawn once on canvas. Tall buildings pick one of the tones.
   const c = document.createElement('canvas');
   c.width = 64;
   c.height = 128;
   const g = c.getContext('2d');
-  g.fillStyle = '#d8c9b0';
+  g.fillStyle = rng.pick(FACADE_WALLS);
   g.fillRect(0, 0, 64, 128);
   for (let y = 8; y < 120; y += 16) {
     for (let x = 6; x < 56; x += 14) {
@@ -99,7 +102,7 @@ export function createWorld(scene, rng) {
   }
 
   // Buildings: 1–4 per block, varied heights and warm colours, rooftop boxes.
-  const facade = windowTexture(rng);
+  const facades = [windowTexture(rng), windowTexture(rng), windowTexture(rng)];
   const boxGeo = new THREE.BoxGeometry(1, 1, 1);
   const roofGeo = new THREE.BoxGeometry(1, 1, 1);
   const blockSpan = CITY.pitch - CITY.roadHalf * 2 - 4;
@@ -126,12 +129,12 @@ export function createWorld(scene, rng) {
         const oz = rng.range(-blockSpan / 4, blockSpan / 4);
         const x = cx + ox;
         const z = cz + oz;
-        const mat = new THREE.MeshLambertMaterial({ color: rng.pick(PALETTE.building), map: h > 18 ? facade : null });
+        const mat = new THREE.MeshLambertMaterial({ color: rng.pick(PALETTE.building), map: h > 18 ? rng.pick(facades) : null });
         const b = new THREE.Mesh(boxGeo, mat);
         b.scale.set(w, h, d);
         b.position.set(x, h / 2, z);
         group.add(b);
-        const roof = new THREE.Mesh(roofGeo, new THREE.MeshLambertMaterial({ color: 0x6a5a48 }));
+        const roof = new THREE.Mesh(roofGeo, new THREE.MeshLambertMaterial({ color: rng.pick(PALETTE.roofs) }));
         roof.scale.set(w * 0.4, 1.2, d * 0.4);
         roof.position.set(x, h + 0.6, z);
         group.add(roof);
@@ -146,8 +149,8 @@ export function createWorld(scene, rng) {
   const leafGeo = new THREE.ConeGeometry(2.6, 3.2, 6);
   const leafMat = new THREE.MeshLambertMaterial({ color: PALETTE.palmLeaf });
   const palmSpots = [];
-  for (let x = -half; x <= half; x += 18) palmSpots.push([x + rng.range(-3, 3), CITY.beachZ + 8 + rng.range(0, 14)]);
-  for (let i = 0; i < 26; i += 1) {
+  for (let x = -half; x <= half; x += 12) palmSpots.push([x + rng.range(-3, 3), CITY.beachZ + 8 + rng.range(0, 14)]);
+  for (let i = 0; i < 52; i += 1) {
     palmSpots.push([rng.range(-half, half), rng.pick(centres) + CITY.roadHalf + 3]);
   }
   for (const [x, z] of palmSpots) {
@@ -180,11 +183,11 @@ export function createWorld(scene, rng) {
   pier.position.set(60, 0.4, CITY.seaZ + 10);
   group.add(pier);
 
-  // Sun, sky and haze.
-  const sun = new THREE.DirectionalLight(PALETTE.sun, 2.4);
+  // Sun, sky and haze — a low golden sun, warm bounce light.
+  const sun = new THREE.DirectionalLight(PALETTE.sun, 2.7);
   sun.position.set(120, 180, 60);
   scene.add(sun);
-  scene.add(new THREE.AmbientLight(0xbfd8e8, 0.9));
+  scene.add(new THREE.AmbientLight(0xffe2b8, 1.0));
   scene.background = new THREE.Color(PALETTE.sky);
   scene.fog = new THREE.Fog(PALETTE.fog, 180, 520);
 

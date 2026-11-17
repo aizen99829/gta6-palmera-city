@@ -49,6 +49,8 @@ const state = {
   clockMin: 16 * 60 + 30,
   message: '',
   messageTimer: 0,
+  crashTimer: 0, // crash damage at most once per half second: a pinned car
+  // scraping a wall must not bleed out in a second of taps
   saveTimer: 0,
   time: 0,
 };
@@ -79,7 +81,7 @@ function load() {
     if (!raw) return;
     const s = JSON.parse(raw);
     if (typeof s.money === 'number') state.money = s.money;
-    if (typeof s.health === 'number') state.health = s.health;
+    if (typeof s.health === 'number') state.health = s.health > 0 ? s.health : PLAYER.maxHealth; // a save written at 0 health (busted) must not insta-bust the next visit
     if (typeof s.mission === 'number') missions.index = Math.min(s.mission, 3);
     if (typeof s.step === 'number') missions.step = s.step;
     if (typeof s.x === 'number' && typeof s.z === 'number') {
@@ -184,15 +186,17 @@ function step(dt) {
   state.time += dt;
   state.clockMin += dt * 2;
   state.messageTimer = Math.max(0, state.messageTimer - dt);
+  state.crashTimer = Math.max(0, state.crashTimer - dt);
   // Wanted heat fades while the player stays out of trouble.
   state.heat = Math.max(0, state.heat - WANTED.decayPerSec * dt);
   // Player on foot or driving.
   if (player.inCar) {
     const hit = driveCar(player.inCar, input, dt, world);
-    if (hit) {
+    if (hit && state.crashTimer <= 0) {
       state.health = Math.max(0, state.health - 2);
       state.message = 'Crash!';
       state.messageTimer = 1;
+      state.crashTimer = 0.5;
     }
   } else {
     stepPlayer(player, input, dt, world);
@@ -256,13 +260,17 @@ function updateCamera(dt) {
   render.setFlash(combat.flash > 0
     ? { x: player.pos.x + Math.sin(player.camYaw) * 2, y: 1.5, z: player.pos.z + Math.cos(player.camYaw) * 2 }
     : null);
+  render.setTracer(combat.flash > 0 ? combat.tracerFrom : null, combat.flash > 0 ? combat.tracerTo : null);
+  // Shots stage their own framing (closer on foot, higher/further in a chase);
+  // live play always uses the defaults.
+  const cam = state.shotCam || {};
   if (player.inCar) {
     const car = player.inCar;
     const target = { x: car.pos.x, y: 1.6, z: car.pos.z };
-    render.updateCamera(target, car.heading, 0.28, 10.5, dt);
+    render.updateCamera(target, car.heading, cam.pitch ?? 0.28, cam.dist ?? 10.5, dt, cam.offset ?? 0);
   } else {
     const target = { x: player.pos.x, y: 1.6, z: player.pos.z };
-    render.updateCamera(target, player.camYaw, player.camPitch, 7.5, dt);
+    render.updateCamera(target, player.camYaw, cam.pitch ?? player.camPitch, cam.dist ?? 7.5, dt, cam.offset ?? 0);
   }
 }
 
@@ -332,13 +340,19 @@ function handleActions() {
 
 // Test hooks: the headless play-test drives the game through these.
 window.__game = {
-  state, player, missions, police, traffic, peds, combat,
+  state, player, missions, police, traffic, peds, combat, world,
   stars, enterCar, exitCar, startGame, bust,
   shotReady: false,
 };
 
 function runShot(name) {
   const scene = stageShot(name, { state, player, traffic, peds, police, missions, combat, world, render, rng });
+  // Shots stage positions directly, so sync the player figure by hand: on
+  // foot it stands where the camera looks, in a car it is hidden, and the
+  // start screen hides it so the skyline is unobstructed.
+  player.mesh.position.set(player.pos.x, 0, player.pos.z);
+  player.mesh.rotation.y = player.inCar ? player.inCar.heading : player.heading;
+  player.mesh.visible = name !== 'start' && !player.inCar;
   updateCamera(1); // snap the chase camera to its target: a shot gets 4 paints, not 400 frames to converge
   let painted = 0;
   function paint() {
