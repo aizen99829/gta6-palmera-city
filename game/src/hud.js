@@ -95,17 +95,18 @@ export function createHud() {
       ctx.beginPath(); ctx.moveTo(toX(c), 0); ctx.lineTo(toX(c), H); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(0, toY(c)); ctx.lineTo(W, toY(c)); ctx.stroke();
     }
-    // Waypoint diamond (large, with a white ring so it reads at a glance).
+    // Waypoint diamond (R3: enlarged ~40% with a white ring so it reads at
+    // a glance, even at contact-sheet scale).
     if (data.waypoint) {
       const wx = toX(data.waypoint.x);
       const wy = toY(data.waypoint.z);
       ctx.fillStyle = '#fff';
       ctx.beginPath();
-      ctx.moveTo(wx, wy - 12); ctx.lineTo(wx + 10, wy); ctx.lineTo(wx, wy + 12); ctx.lineTo(wx - 10, wy);
+      ctx.moveTo(wx, wy - 17); ctx.lineTo(wx + 14, wy); ctx.lineTo(wx, wy + 17); ctx.lineTo(wx - 14, wy);
       ctx.closePath(); ctx.fill();
       ctx.fillStyle = '#ffd94a';
       ctx.beginPath();
-      ctx.moveTo(wx, wy - 8); ctx.lineTo(wx + 7, wy); ctx.lineTo(wx, wy + 8); ctx.lineTo(wx - 7, wy);
+      ctx.moveTo(wx, wy - 12); ctx.lineTo(wx + 10, wy); ctx.lineTo(wx, wy + 12); ctx.lineTo(wx - 10, wy);
       ctx.closePath(); ctx.fill();
     }
     // Traffic dots.

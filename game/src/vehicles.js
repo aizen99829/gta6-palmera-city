@@ -18,6 +18,24 @@ export function makeCarMesh(color, police) {
   );
   cabin.position.set(0, 1.15, -0.2);
   group.add(cabin);
+  // R3: the cabin read as a plain black slab on dark traffic cars. A pale
+  // roof slab + pale-blue glass front/rear give every car a two-tone
+  // glasshouse, so traffic reads as cars from behind and above, not boxes.
+  const roofSlab = new THREE.Mesh(
+    new THREE.BoxGeometry(1.74, 0.08, 2.0),
+    new THREE.MeshLambertMaterial({ color: police ? PALETTE.policeWhite : 0xe8eef2 }),
+  );
+  roofSlab.position.set(0, 1.49, -0.2);
+  group.add(roofSlab);
+  const glassMat = new THREE.MeshLambertMaterial({ color: 0x9fc8dd });
+  const shield = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 0.06), glassMat);
+  shield.position.set(0, 1.15, 0.93);
+  shield.rotation.x = -0.28;
+  group.add(shield);
+  const rearGlass = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.55, 0.06), glassMat);
+  rearGlass.position.set(0, 1.15, -1.33);
+  rearGlass.rotation.x = 0.28;
+  group.add(rearGlass);
   if (police) {
     const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.02, 0.25, 4.42), new THREE.MeshLambertMaterial({ color: PALETTE.policeBlack }));
     stripe.position.y = 0.62;
@@ -52,9 +70,23 @@ export function makeCarMesh(color, police) {
     group.add(w);
     wheels.push(w);
   }
+  // R3 blob shadow: a soft dark ellipse under the car, so it sits on the
+  // road instead of floating on it. (A real shadow map was measured and
+  // rejected: −46%/−61% FPS in swiftshader — see world.js.)
+  const blob = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.7, 5.0),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.3, depthWrite: false }),
+  );
+  blob.rotation.x = -Math.PI / 2;
+  blob.position.y = 0.12;
+  group.add(blob);
   const head = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.18, 0.2), new THREE.MeshBasicMaterial({ color: 0xfff6c8 }));
   head.position.set(0, 0.6, 2.22);
   group.add(head);
+  // Taillights mirror the headlights.
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.16, 0.1), new THREE.MeshBasicMaterial({ color: 0xcc2222 }));
+  tail.position.set(0, 0.6, -2.22);
+  group.add(tail);
   return { group, wheels };
 }
 

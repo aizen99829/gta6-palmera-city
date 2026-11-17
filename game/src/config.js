@@ -78,7 +78,7 @@ export const MISSIONS = [
     story: 'Marco needs a car, fast, and he does not ask where it came from. Take any car on the street and bring it to the blue waypoint at the marina.',
     steps: [
       { type: 'steal', text: 'Take a car (walk up to one and press E)' },
-      { type: 'goto', pos: [150, 150], radius: 10, text: 'Drive the car to the marina waypoint' },
+      { type: 'goto', pos: [150, 150], radius: 10, text: 'Fight past the PD and reach the marina waypoint' },
     ],
   },
   {

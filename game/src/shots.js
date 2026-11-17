@@ -58,14 +58,27 @@ export function stageShot(name, ctx) {
   state.shotCam = null;
   if (name === 'start') {
     state.screen = 'start';
-    player.pos.x = 9;
-    player.pos.z = 190; // on the sand, clear of the beach palms (they start at z≈204)
-    player.camYaw = Math.PI + 0.12; // face the city from the beach, slightly angled
-    player.camPitch = 0.32;
-    state.shotCam = { dist: 8, pitch: 0.32 };
+    // R3: the old spot (sand at z=190) left the bottom half of the frame as
+    // empty sand. Stand at the southern intersection (0,168) instead: road,
+    // dashes and kerbs fill the foreground, with parked cars and locals in
+    // frame and the skyline still behind the panel.
+    player.pos.x = 0;
+    player.pos.z = 168;
+    player.camYaw = Math.PI + 0.08; // face the city from the beach road, slightly angled
+    player.camPitch = 0.34;
+    state.shotCam = { dist: 8, pitch: 0.34 };
     ctx.missions.index = 0;
     ctx.missions.step = 0;
     advanceWorld(ctx, 2);
+    // Parked cars at both kerbs of this road + locals on the sidewalks.
+    // Staged fresh in saturated fleet colours (repositioned random parked
+    // cars came out pale and unreadable here): yellow west kerb, blue east.
+    stageCar(ctx, 1, -5.5, 160, Math.PI / 2, 0);
+    stageCar(ctx, 0, 5.5, 156, -Math.PI / 2, 0);
+    stageCar(ctx, 0, -2.2, 148, Math.PI, 9); // traffic rolling away up the avenue
+    stagePed(ctx, -8, 158.5, 0);
+    stagePed(ctx, 7, 177.5, Math.PI);
+    stagePed(ctx, 12, 158.5, -Math.PI / 2);
     return { screen: 'start', announce: 'Palmera City. Press Space or click to start.' };
   }
   if (name === 'street') {
@@ -127,17 +140,24 @@ export function stageShot(name, ctx) {
     stagePed(ctx, 112, 102.5, 0);
     // The shot itself: hits the cruiser, so the message, the heat and the
     // tracer all say combat happened. Flash/tracer persist for the paints —
-    // the shot loop never steps combat in shot mode.
+    // the shot loop never steps combat in shot mode. R3: pre-heat to 25 so
+    // the +30 from the hit lands on ★★, and the step text in config now
+    // reads "Fight past the PD…" — the on-foot shootout matches the
+    // objective instead of contradicting a "drive the car" line.
+    state.heat = 25;
     tryShoot(ctx.combat, { x: player.pos.x, z: player.pos.z }, { x: 1, z: 0 }, ctx.peds, ctx.police.cars, state);
     state.message = 'You hit a cruiser!';
     state.messageTimer = 99;
     return { screen: 'play', announce: 'Playing Palmera City.' };
   }
   // chase (cover): driving fast with three cruisers on the tail, 3 stars.
+  // R3: staged on the southern avenue (z≈110, driving south) instead of
+  // z=−56, so the beach road, palms and the sea sit in the frame ahead
+  // instead of a thin strip at the horizon.
   ctx.missions.index = 2;
   ctx.missions.step = 1; // evade — lose the cops
   state.heat = 65;
-  const car = putPlayerInCar(ctx, 0, -56, 0);
+  const car = putPlayerInCar(ctx, 0, 110, 0);
   car.speed = 26;
   player.camYaw = 0;
   // Higher and further back than v1, slightly offset: the flanking walls
@@ -151,7 +171,7 @@ export function stageShot(name, ctx) {
     // Two cruisers ahead coming head-on, one on the tail: the chase reads
     // from the driving camera, which looks where the car is going.
     const ahead = i < 2;
-    const cz = ahead ? -56 + 50 + i * 9 : -56 - 16;
+    const cz = ahead ? 110 + 50 + i * 9 : 110 - 16;
     const cruiser = createCar(ctx.render.scene, -4 + i * 5, cz, ahead ? Math.PI : 0, 0xf2f2f2, true);
     cruiser.driver = 'police';
     cruiser.speed = 22;

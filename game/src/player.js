@@ -32,6 +32,14 @@ export function createPlayer(scene) {
   const armR = new THREE.Mesh(armGeo, shirt);
   armR.position.set(0.48, 1.15, 0);
   group.add(armR);
+  // R3 blob shadow: grounds Luz on the street (same cheap approach as cars).
+  const blob = new THREE.Mesh(
+    new THREE.CircleGeometry(0.55, 12),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false }),
+  );
+  blob.rotation.x = -Math.PI / 2;
+  blob.position.y = 0.12;
+  group.add(blob);
   scene.add(group);
   return {
     mesh: group,

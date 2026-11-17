@@ -7,11 +7,13 @@
 import * as THREE from 'three';
 import { CITY, PALETTE } from './config.js';
 
-const FACADE_WALLS = ['#d8c9b0', '#e0b890', '#c9b8a3', '#b8c4c9'];
+const FACADE_WALLS = ['#d8c9b0', '#e0b890', '#c9b8a3', '#b8c4c9', '#d9a06b', '#a8b89a'];
 
 function windowTexture(rng) {
   // One shared facade texture per wall tone: lit windows on a warm wall,
-  // drawn once on canvas. Tall buildings pick one of the tones.
+  // drawn once on canvas. Tall buildings pick one of the tones. R3: floor
+  // separator lines + a darker ground floor with a door, so the slab reads
+  // as stacked storeys instead of a flat dotted box.
   const c = document.createElement('canvas');
   c.width = 64;
   c.height = 128;
@@ -20,10 +22,19 @@ function windowTexture(rng) {
   g.fillRect(0, 0, 64, 128);
   for (let y = 8; y < 120; y += 16) {
     for (let x = 6; x < 56; x += 14) {
-      g.fillStyle = rng.next() < 0.45 ? '#ffe9a8' : '#2e4a5a';
+      const r = rng.next();
+      g.fillStyle = r < 0.35 ? '#ffe9a8' : r < 0.75 ? '#2e4a5a' : '#5a7a8a';
       g.fillRect(x, y, 9, 11);
     }
+    // Floor line under each row of windows.
+    g.fillStyle = 'rgba(0,0,0,0.28)';
+    g.fillRect(0, y + 13, 64, 2);
   }
+  // Ground floor: darker band + a door, so the base is not just wall.
+  g.fillStyle = 'rgba(0,0,0,0.30)';
+  g.fillRect(0, 110, 64, 18);
+  g.fillStyle = '#2e2118';
+  g.fillRect(27, 114, 10, 14);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -91,8 +102,10 @@ export function createWorld(scene, rng) {
       walk.position.set(horizontal ? 0 : c, 0.06, horizontal ? c : 0);
       if (!horizontal) walk.rotation.z = Math.PI / 2;
       group.add(walk);
-      for (let d = -half; d <= half; d += 14) {
-        const dash = new THREE.Mesh(new THREE.PlaneGeometry(4, 0.5), dashMat);
+      // R3: dashes were 4 m long and read as giant yellow slabs in the
+      // foreground of on-foot shots — 2.4 m, narrower, spaced 10 m apart.
+      for (let d = -half; d <= half; d += 10) {
+        const dash = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 0.35), dashMat);
         dash.rotation.x = -Math.PI / 2;
         dash.position.set(horizontal ? d : c, 0.1, horizontal ? c : d);
         if (!horizontal) dash.rotation.z = Math.PI / 2;
@@ -138,6 +151,22 @@ export function createWorld(scene, rng) {
         roof.scale.set(w * 0.4, 1.2, d * 0.4);
         roof.position.set(x, h + 0.6, z);
         group.add(roof);
+        // R3 fake grounding (no shadow map: a 1024 map over the whole city
+        // cost −46% start / −61% driving FPS in swiftshader, and its texels
+        // would be ~0.4 m anyway). A dark plinth band at the base reads as
+        // contact shadow, and a soft ground shadow falls to the north-west,
+        // away from the low south-eastern sun.
+        const plinth = new THREE.Mesh(roofGeo, new THREE.MeshLambertMaterial({ color: 0x4a4038 }));
+        plinth.scale.set(w + 0.5, 1.4, d + 0.5);
+        plinth.position.set(x, 0.7, z);
+        group.add(plinth);
+        const bShadow = new THREE.Mesh(
+          new THREE.PlaneGeometry(w + 8, d + 8),
+          new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.16, depthWrite: false }),
+        );
+        bShadow.rotation.x = -Math.PI / 2;
+        bShadow.position.set(x - 4, 0.12, z - 3);
+        group.add(bShadow);
         colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2 });
       }
     }

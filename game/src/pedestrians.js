@@ -31,8 +31,18 @@ export function spawnPed(scene, rng, x, z, heading) {
   group.position.set(x, 0, z);
   group.rotation.y = heading;
   scene.add(group);
+  // R3 blob shadow, kept out of the group: the group tips over (rotation.x)
+  // when a ped is knocked down, which would stand the blob upright. The
+  // blob lives in the scene and is synced in stepPedestrians.
+  const blob = new THREE.Mesh(
+    new THREE.CircleGeometry(0.45, 12),
+    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.26, depthWrite: false }),
+  );
+  blob.rotation.x = -Math.PI / 2;
+  blob.position.set(x, 0.12, z);
+  scene.add(blob);
   return {
-    mesh: group, legL, legR,
+    mesh: group, legL, legR, blob,
     pos: { x, z },
     heading,
     speed: rng.range(0.8, 1.6),
@@ -106,6 +116,7 @@ export function stepPedestrians(peds, dt, rng, world, threat) {
     ped.legR.rotation.x = -Math.sin(ped.phase) * 0.5;
     ped.mesh.position.set(ped.pos.x, 0, ped.pos.z);
     ped.mesh.rotation.y = ped.heading;
+    if (ped.blob) ped.blob.position.set(ped.pos.x, 0.12, ped.pos.z);
   }
 }
 
