@@ -160,6 +160,11 @@ export function stageShot(name, ctx) {
   ctx.missions.step = 1; // evade — lose the cops
   state.heat = 65;
   const car = putPlayerInCar(ctx, 0, 110, 0);
+  // v2: the cover's player car is always Luz's red — ambient palette picks
+  // drift as worldgen rng consumption changes, and one build seated her in
+  // a cream car that vanished among the white cruisers. The body is the
+  // first mesh makeCarMesh adds, with its own material instance.
+  car.mesh.children[0].material.color.setHex(0xc0392b);
   car.speed = 26;
   player.camYaw = 0;
   // Higher and further back than v1, slightly offset: the flanking walls

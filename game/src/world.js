@@ -115,6 +115,55 @@ export function createWorld(scene, rng) {
   sea.position.set(0, 0.02, CITY.seaZ + 130);
   group.add(sea);
 
+  // v2 shoreline: a band of darker wet sand where the water meets the
+  // beach, and a wavy foam line on top of it. v1's sand simply stopped at
+  // the sea plane — a hard colour edge across the whole cover shot.
+  const wet = new THREE.Mesh(
+    new THREE.PlaneGeometry(CITY.size * 2, 11),
+    new THREE.MeshLambertMaterial({ color: 0xc9ac72, transparent: true, opacity: 0.6 }),
+  );
+  wet.rotation.x = -Math.PI / 2;
+  wet.position.set(0, 0.06, CITY.seaZ - 24);
+  group.add(wet);
+  const foamGeo = new THREE.PlaneGeometry(CITY.size * 2, 2.6, 96, 1);
+  const foamPos = foamGeo.attributes.position;
+  for (let i = 0; i < foamPos.count; i += 1) {
+    foamPos.setY(i, foamPos.getY(i) + Math.sin(foamPos.getX(i) * 0.045) * 0.9);
+  }
+  foamGeo.computeVertexNormals();
+  const foam = new THREE.Mesh(
+    foamGeo,
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false }),
+  );
+  foam.rotation.x = -Math.PI / 2;
+  foam.position.set(0, 0.08, CITY.seaZ - 19);
+  group.add(foam);
+
+  // v2 beach life: umbrellas + towels on the sand (the cover shot looks
+  // straight down this beach). Kept clear of the pier and the lighthouse.
+  const UMBRELLAS = [0xe74c3c, 0xf39c12, 0x2a9d8f, 0xe67e22, 0xecf0f1, 0x4a90d9];
+  const umbPoleGeo = new THREE.CylinderGeometry(0.06, 0.08, 2.3, 6);
+  const umbPoleMat = new THREE.MeshLambertMaterial({ color: 0x8a6a42 });
+  const umbTopGeo = new THREE.ConeGeometry(1.7, 0.75, 8);
+  const towelGeo = new THREE.PlaneGeometry(1.9, 0.95);
+  for (let i = 0; i < 10; i += 1) {
+    const ux = rng.range(-320, 320);
+    if (Math.abs(ux - 60) < 10 || Math.abs(ux + 40) < 9) continue;
+    const uz = CITY.beachZ + rng.range(2, 15);
+    const pole = new THREE.Mesh(umbPoleGeo, umbPoleMat);
+    pole.position.set(ux, 1.15, uz);
+    pole.rotation.z = rng.range(-0.07, 0.07);
+    group.add(pole);
+    const top = new THREE.Mesh(umbTopGeo, new THREE.MeshLambertMaterial({ color: rng.pick(UMBRELLAS) }));
+    top.position.set(ux, 2.35, uz);
+    group.add(top);
+    const towel = new THREE.Mesh(towelGeo, new THREE.MeshLambertMaterial({ color: rng.pick(UMBRELLAS) }));
+    towel.rotation.x = -Math.PI / 2;
+    towel.rotation.z = rng.range(0, Math.PI);
+    towel.position.set(ux + rng.range(1.6, 2.6), 0.09, uz + rng.range(-0.5, 1.5));
+    group.add(towel);
+  }
+
   // Roads: dark strips + centre dashes, sidewalks as pale borders.
   const roadMat = new THREE.MeshLambertMaterial({ color: PALETTE.asphalt });
   const walkMat = new THREE.MeshLambertMaterial({ color: PALETTE.sidewalk });
@@ -351,11 +400,31 @@ export function createWorld(scene, rng) {
   pier.position.set(60, 0.4, CITY.seaZ + 10);
   group.add(pier);
 
-  // Sun, sky and haze — a low golden sun, warm bounce light.
+  // v2 clouds: a few flat, soft billboards high over the city, so the sky
+  // in the driving shots is not one flat colour. fog:false — at their
+  // distance the city haze would erase them entirely.
+  const cloudMat = new THREE.MeshBasicMaterial({
+    color: 0xffffff, transparent: true, opacity: 0.5, depthWrite: false,
+    side: THREE.DoubleSide, fog: false,
+  });
+  for (let i = 0; i < 8; i += 1) {
+    const cloud = new THREE.Mesh(
+      new THREE.PlaneGeometry(rng.range(60, 130), rng.range(13, 24)),
+      cloudMat,
+    );
+    cloud.rotation.x = -Math.PI / 2 + rng.range(-0.15, 0.15);
+    cloud.position.set(rng.range(-420, 420), rng.range(95, 135), rng.range(-420, 420));
+    group.add(cloud);
+  }
+
+  // Sun, sky and haze — a low golden sun, warm bounce light. v2 adds a
+  // hemisphere light (sky above, sand below) and trims the flat ambient, so
+  // shaded facades keep a cool/warm split instead of one flat tone.
   const sun = new THREE.DirectionalLight(PALETTE.sun, 2.7);
   sun.position.set(120, 180, 60);
   scene.add(sun);
-  scene.add(new THREE.AmbientLight(0xffe2b8, 1.0));
+  scene.add(new THREE.AmbientLight(0xffe2b8, 0.72));
+  scene.add(new THREE.HemisphereLight(0xbfd9e8, 0xe8d29a, 0.55));
   scene.background = new THREE.Color(PALETTE.sky);
   scene.fog = new THREE.Fog(PALETTE.fog, 180, 520);
 
