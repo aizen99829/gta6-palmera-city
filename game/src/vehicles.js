@@ -90,9 +90,17 @@ export function makeCarMesh(color, police, kind = 'sedan') {
     // R3: the cabin read as a plain black slab on dark traffic cars. A pale
     // roof slab + pale-blue glass front/rear give every car a two-tone
     // glasshouse, so traffic reads as cars from behind and above, not boxes.
+    // v3.1: the sport slab is body-coloured (and slightly narrower than the
+    // cabin, so the dark glasshouse edges frame it), so roof + body read as
+    // one continuous coupe roofline from the rear-top chase angle instead
+    // of a pale panel floating over the black cabin ("targa"). Other kinds
+    // keep the pale slab — the R3 fix for black cabins on dark cars.
+    const sportRoof = kind === 'sport' && !police;
     const roofSlab = new THREE.Mesh(
-      new THREE.BoxGeometry(cabW + 0.04, 0.08, K.cabLen - 0.2),
-      new THREE.MeshLambertMaterial({ color: police ? PALETTE.policeWhite : 0xe8eef2 }),
+      new THREE.BoxGeometry(sportRoof ? cabW - 0.12 : cabW + 0.04, 0.08, K.cabLen - 0.2),
+      new THREE.MeshLambertMaterial({
+        color: police ? PALETTE.policeWhite : sportRoof ? color : 0xe8eef2,
+      }),
     );
     roofSlab.position.set(0, cabY + cabH / 2 + 0.04, K.cabZ);
     group.add(roofSlab);

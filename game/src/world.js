@@ -602,17 +602,50 @@ export function createWorld(scene, rng) {
   }
 
   // Lighthouse point on the beach (mission 4 destination) + pier into the sea.
-  const lightMat = new THREE.MeshLambertMaterial({ color: 0xf2ede4 });
-  const tower = new THREE.Mesh(new THREE.CylinderGeometry(2, 2.6, 16, 10), lightMat);
-  tower.position.set(-40, 8, CITY.beachZ + 26);
-  group.add(tower);
+  // v3.1: staged on the sun side (x=+45) so the tower silhouettes against
+  // the bright sunset sky in the cover shot, and banded red/white so it
+  // reads as a lighthouse even at sheet scale. Tower 18 m + lamp room.
+  const LIGHTHOUSE_X = 45;
+  const LIGHTHOUSE_Z = CITY.beachZ + 26;
+  const towerH = 18;
+  const bands = 5;
+  const bandH = towerH / bands;
+  const bandRedMat = new THREE.MeshLambertMaterial({ color: 0x8e1f1f });
+  const bandWhiteMat = new THREE.MeshLambertMaterial({ color: 0xf2ede4 });
+  for (let i = 0; i < bands; i += 1) {
+    const t0 = i / bands;
+    const t1 = (i + 1) / bands;
+    const seg = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.6 - 0.6 * t1, 2.6 - 0.6 * t0, bandH, 10),
+      i % 2 === 0 ? bandRedMat : bandWhiteMat,
+    );
+    seg.position.set(LIGHTHOUSE_X, bandH * (i + 0.5), LIGHTHOUSE_Z);
+    group.add(seg);
+  }
+  // Lamp room: dark base + bright bulb + dark cap, with a small glow sprite
+  // so the light point reads at sheet scale. The bulb stays the `lamp`
+  // mesh so main.js can keep flashing it.
+  const lampRoomMat = new THREE.MeshLambertMaterial({ color: 0x1c1c22 });
+  const lampBase = new THREE.Mesh(new THREE.CylinderGeometry(2.1, 2.1, 0.7, 10), lampRoomMat);
+  lampBase.position.set(LIGHTHOUSE_X, towerH + 0.35, LIGHTHOUSE_Z);
+  group.add(lampBase);
   const lamp = new THREE.Mesh(
-    new THREE.SphereGeometry(1.4, 10, 8),
-    new THREE.MeshBasicMaterial({ color: 0xffe9a8 }),
+    new THREE.SphereGeometry(1.15, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffe27a }),
   );
-  lamp.position.set(-40, 17, CITY.beachZ + 26);
+  lamp.position.set(LIGHTHOUSE_X, towerH + 1.35, LIGHTHOUSE_Z);
   group.add(lamp);
-  colliders.push({ minX: -43, maxX: -37, minZ: CITY.beachZ + 23, maxZ: CITY.beachZ + 29 });
+  const lampCap = new THREE.Mesh(new THREE.ConeGeometry(1.9, 1.3, 10), lampRoomMat);
+  lampCap.position.set(LIGHTHOUSE_X, towerH + 2.5, LIGHTHOUSE_Z);
+  group.add(lampCap);
+  const lampGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(), blending: THREE.AdditiveBlending,
+    transparent: true, depthWrite: false, fog: false,
+  }));
+  lampGlow.position.set(LIGHTHOUSE_X, towerH + 1.35, LIGHTHOUSE_Z);
+  lampGlow.scale.set(14, 14, 1);
+  group.add(lampGlow);
+  colliders.push({ minX: LIGHTHOUSE_X - 3, maxX: LIGHTHOUSE_X + 3, minZ: LIGHTHOUSE_Z - 3, maxZ: LIGHTHOUSE_Z + 3 });
   const pier = new THREE.Mesh(
     new THREE.BoxGeometry(6, 0.8, 60),
     new THREE.MeshLambertMaterial({ color: 0x8a6a42 }),
