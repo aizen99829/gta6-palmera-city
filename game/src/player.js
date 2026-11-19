@@ -1,119 +1,77 @@
-// Lucia "Luz" Vega on foot: a low-poly figure whose legs swing as she walks, a
-// third-person camera that trails behind her heading, and simple on-foot rules:
-// run with Shift, collide with buildings, and step into a nearby car with E.
+// player.js — Luz on foot: a simple articulated figure (capsule torso,
+// swinging arms/legs, dark-pink hair, gold hoop earring, white sneakers)
+// plus her movement model. Movement is camera-relative; the camera yaw
+// is hers to drag. Stamina is a real meter (drains while sprinting,
+// refills at rest) shown on the HUD; it never gates her speed.
 import * as THREE from 'three';
-import { PALETTE, PLAYER } from './config.js';
+import { clamp } from './random.js';
 
 export function createPlayer(scene) {
-  const group = new THREE.Group();
-  const shirt = new THREE.MeshLambertMaterial({ color: PALETTE.playerShirt });
-  const pants = new THREE.MeshLambertMaterial({ color: PALETTE.playerPants });
+  const g = new THREE.Group();
   const skin = new THREE.MeshLambertMaterial({ color: 0xc98a5e });
-  const torso = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.8, 0.4), shirt);
-  torso.position.y = 1.15;
-  group.add(torso);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), skin);
-  head.position.y = 1.75;
-  group.add(head);
-  // v5.1 (P4): her hair is the dark pink of her HUD portrait (was plain
-  // black), plus the portrait's gold hoop earring and white sneakers —
-  // cheap focal detail on the one character the camera lives behind.
-  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.29, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x4a1030 }));
-  hair.position.y = 1.78;
-  group.add(hair);
-  const earring = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), new THREE.MeshBasicMaterial({ color: 0xffd94a }));
-  earring.position.set(0.29, 1.62, 0);
-  group.add(earring);
-  const legGeo = new THREE.BoxGeometry(0.26, 0.75, 0.3);
-  const legL = new THREE.Mesh(legGeo, pants);
-  legL.position.set(-0.18, 0.38, 0);
-  group.add(legL);
-  const legR = new THREE.Mesh(legGeo, pants);
-  legR.position.set(0.18, 0.38, 0);
-  group.add(legR);
-  // v5.1 (P4): white sneakers ride the legs so they follow the walk swing.
-  const shoeMat = new THREE.MeshLambertMaterial({ color: 0xf2ede4 });
-  for (const leg of [legL, legR]) {
-    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.12, 0.42), shoeMat);
-    shoe.position.set(0, -0.36, 0.05);
-    leg.add(shoe);
+  const top = new THREE.MeshLambertMaterial({ color: 0xd81b60 });
+  const pants = new THREE.MeshLambertMaterial({ color: 0x23283a });
+  const hairM = new THREE.MeshLambertMaterial({ color: 0x4a1030 });
+  const shoeM = new THREE.MeshLambertMaterial({ color: 0xf5f6fa });
+  const gold = new THREE.MeshBasicMaterial({ color: 0xffcf4d });
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.30, 0.55, 3, 10), top);
+  torso.position.y = 1.05; g.add(torso);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.21, 12, 10), skin);
+  head.position.y = 1.78; g.add(head);
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.23, 12, 10), hairM);
+  hair.position.set(0, 1.86, -0.04); hair.scale.set(1, 0.82, 1); g.add(hair);
+  const earring = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.016, 6, 12), gold);
+  earring.position.set(0.22, 1.7, 0); g.add(earring);
+  const limbs = [];
+  for (const [x, y, len, mat] of [[-0.42, 1.32, 0.62, top], [0.42, 1.32, 0.62, top],
+                                 [-0.16, 0.62, 0.66, pants], [0.16, 0.62, 0.66, pants]]) {
+    const pivot = new THREE.Group(); pivot.position.set(x, y, 0);
+    const limb = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, len, 3, 8), mat);
+    limb.position.y = -len / 2; pivot.add(limb);
+    if (y < 1) { const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.09, 0.3), shoeM); shoe.position.set(0, -len - 0.04, 0.05); pivot.add(shoe); }
+    g.add(pivot); limbs.push(pivot);
   }
-  const armGeo = new THREE.BoxGeometry(0.2, 0.7, 0.24);
-  const armL = new THREE.Mesh(armGeo, shirt);
-  armL.position.set(-0.48, 1.15, 0);
-  group.add(armL);
-  const armR = new THREE.Mesh(armGeo, shirt);
-  armR.position.set(0.48, 1.15, 0);
-  group.add(armR);
-  // R3 blob shadow: grounds Luz on the street (same cheap approach as cars).
-  const blob = new THREE.Mesh(
-    new THREE.CircleGeometry(0.55, 12),
-    new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.28, depthWrite: false }),
-  );
-  blob.rotation.x = -Math.PI / 2;
-  blob.position.y = 0.12;
-  group.add(blob);
-  scene.add(group);
+  scene.add(g);
   return {
-    mesh: group,
-    legL,
-    legR,
-    armL,
-    armR,
-    pos: { x: 0, z: 0 },
-    heading: 0,
-    camYaw: 0,
-    camPitch: 0.32,
-    walkPhase: 0,
-    moving: false,
-    inCar: null,
-    punchTimer: 0,
-    // v5 (g4): stamina is a real, local display state — it drains while
-    // sprinting and refills at rest, but running out NEVER slows Luz in
-    // v5 (recorded design debt in PLAN §2-g4, not a bug).
-    stamina: 100,
+    pos: { x: 4, z: 178 }, heading: 0, camYaw: 0, camPitch: 0.32,
+    radius: 0.55, stamina: 100, inCar: null, mesh: g, limbs, walkCycle: 0, moving: false,
   };
 }
 
 export function stepPlayer(player, input, dt, world) {
-  // v5 (g4): stamina bookkeeping (display only — see createPlayer note).
-  if (input.held.run && player.moving) player.stamina = Math.max(0, player.stamina - 22 * dt);
-  else player.stamina = Math.min(100, player.stamina + 16 * dt);
-  const drag = input.takeDrag();
-  player.camYaw -= drag.x * 0.004;
-  player.camPitch = Math.max(-0.1, Math.min(1.1, player.camPitch + drag.y * 0.003));
-  const fwd = (input.held.forward ? 1 : 0) - (input.held.back ? 1 : 0);
-  const strafe = (input.held.right ? 1 : 0) - (input.held.left ? 1 : 0);
-  const speed = input.held.run ? PLAYER.runSpeed : PLAYER.walkSpeed;
-  const sin = Math.sin(player.camYaw);
-  const cos = Math.cos(player.camYaw);
-  const mx = sin * fwd + cos * strafe;
-  const mz = cos * fwd - sin * strafe;
-  const len = Math.hypot(mx, mz);
-  player.moving = len > 0.01;
-  if (player.moving) {
-    const nx = player.pos.x + (mx / len) * speed * dt;
-    const nz = player.pos.z + (mz / len) * speed * dt;
-    const fixed = world.collide(nx, nz, PLAYER.radius);
-    player.pos.x = fixed.x;
-    player.pos.z = fixed.z;
-    player.heading = Math.atan2(mx / len, mz / len);
-    player.walkPhase += dt * speed * 1.6;
+  let mx = 0; let mz = 0;
+  if (input.forward) mz += 1;
+  if (input.back) mz -= 1;
+  if (input.left) mx -= 1;
+  if (input.right) mx += 1;
+  const mag = Math.hypot(mx, mz);
+  player.moving = mag > 0;
+  if (mag > 0) {
+    mx /= mag; mz /= mag;
+    const sin = Math.sin(player.camYaw); const cos = Math.cos(player.camYaw);
+    const wx = mx * cos + mz * sin;
+    const wz = -mx * sin + mz * cos;
+    const running = input.run;
+    const speed = running ? 6.8 : 3.4;
+    player.pos.x += wx * speed * dt;
+    player.pos.z += wz * speed * dt;
+    player.heading = Math.atan2(wx, wz);
+    player.walkCycle += dt * (running ? 11 : 7.5);
+    if (running) player.stamina = Math.max(0, player.stamina - 22 * dt);
+  } else {
+    player.stamina = Math.min(100, player.stamina + 16 * dt);
   }
-  const swing = player.moving ? Math.sin(player.walkPhase) * 0.6 : 0;
-  player.legL.rotation.x = swing;
-  player.legR.rotation.x = -swing;
-  player.armL.rotation.x = -swing * 0.8;
-  player.armR.rotation.x = swing * 0.8;
-  if (player.punchTimer > 0) {
-    player.punchTimer -= dt;
-    player.armR.rotation.x = -1.6 * Math.max(0, player.punchTimer / 0.25);
-  }
+  world.collide(player.pos, player.radius);
+  const swing = player.moving ? Math.sin(player.walkCycle) * 0.55 : 0;
+  player.limbs[0].rotation.x = swing;
+  player.limbs[1].rotation.x = -swing;
+  player.limbs[2].rotation.x = -swing;
+  player.limbs[3].rotation.x = swing;
   player.mesh.position.set(player.pos.x, 0, player.pos.z);
   player.mesh.rotation.y = player.heading;
-  player.mesh.visible = !player.inCar;
+  return player.moving;
 }
-
-export function playerCameraTarget(player) {
-  return { x: player.pos.x, y: 1.6, z: player.pos.z };
+export function syncPlayerToCar(player, car) {
+  player.pos.x = car.pos.x; player.pos.z = car.pos.z;
+  player.heading = car.heading;
 }

@@ -1,131 +1,96 @@
-// v5 helicopter (f1–f3): a purely VISUAL Palmera PD air unit. It appears at
-// 3+ stars, orbits behind/above the player, and paints a searchlight cone +
-// ground pool. It has no heat, damage or bust of its own — police.js is
-// untouched. Rotor spin runs on an accumulated dt clock (heli.t), never
-// performance.now(), so screenshot frames stay deterministic.
+// heli.js — the Palmera PD air unit. Pure presence: at 3 stars or more
+// it slides in, orbits the target at roughly 33 m with its searchlight
+// cone and ground pool locked on, and leaves when the heat dies. It
+// never adds heat, damage or a bust by itself.
 import * as THREE from 'three';
+import { radialGlowTexture } from './textures.js';
 
 export function createHeli(scene) {
   const group = new THREE.Group();
-  const white = new THREE.MeshLambertMaterial({ color: 0xf2f2f2 });
-  const dark = new THREE.MeshLambertMaterial({ color: 0x1a1d22 });
-  const blue = new THREE.MeshLambertMaterial({ color: 0x2456c8 });
-  const glass = new THREE.MeshLambertMaterial({ color: 0x22303c });
-  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.5, 4.6), white);
-  group.add(body);
+  const white = new THREE.MeshLambertMaterial({ color: 0xf2f3f5 });
+  const dark = new THREE.MeshLambertMaterial({ color: 0x23262e });
+  const blue = new THREE.MeshLambertMaterial({ color: 0x2266cc });
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.7, 4.6), white);
+  body.position.y = 0; group.add(body);
   const belly = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.5, 4.2), dark);
-  belly.position.y = -0.85;
-  group.add(belly);
-  const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.24, 0.32, 4.0), blue);
-  stripe.position.y = 0.05;
-  group.add(stripe);
-  const cockpit = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.95, 1.3), glass);
-  cockpit.position.set(0, 0.28, 1.95);
-  cockpit.rotation.x = -0.15;
-  group.add(cockpit);
+  belly.position.y = -0.95; group.add(belly);
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.24, 0.34, 4.0), blue);
+  stripe.position.y = 0.25; group.add(stripe);
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.9, 1.2),
+    new THREE.MeshPhongMaterial({ color: 0x2a3a4d, shininess: 120, specular: 0xffffff }));
+  glass.position.set(0, 0.35, 2.2); group.add(glass);
   const boom = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.5, 4.6), white);
-  boom.position.set(0, 0.35, -4.3);
-  group.add(boom);
-  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.4, 0.9), blue);
-  fin.position.set(0, 0.85, -6.5);
-  group.add(fin);
-  const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.15, 0.2), dark);
-  tailRotor.position.set(0.3, 0.85, -6.5);
-  group.add(tailRotor);
-  for (const sx of [-0.95, 0.95]) {
+  boom.position.set(0, 0.3, -4.4); group.add(boom);
+  const fin = new THREE.Mesh(new THREE.BoxGeometry(0.16, 1.5, 0.7), blue);
+  fin.position.set(0, 0.8, -6.6); group.add(fin);
+  const tailRotor = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.6, 0.18), dark);
+  tailRotor.position.set(0.2, 0.8, -6.6); group.add(tailRotor);
+  for (const sx of [-0.9, 0.9]) {
     const skid = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 3.4), dark);
-    skid.position.set(sx, -1.5, 0);
-    group.add(skid);
-    for (const sz of [-1.1, 1.1]) {
-      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.6, 0.1), dark);
-      strut.position.set(sx, -1.15, sz);
-      group.add(strut);
-    }
+    skid.position.set(sx, -1.5, 0); group.add(skid);
+    const strut = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.6, 0.1), dark);
+    strut.position.set(sx, -1.2, 0.6); group.add(strut);
   }
-  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.55, 8), dark);
-  mast.position.y = 0.95;
-  group.add(mast);
-  const rotor = new THREE.Group();
-  rotor.position.y = 1.25;
-  const bladeA = new THREE.Mesh(new THREE.BoxGeometry(7.8, 0.06, 0.5), dark);
-  rotor.add(bladeA);
-  const bladeB = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 7.8), dark);
-  rotor.add(bladeB);
+  const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.7, 6), dark);
+  mast.position.y = 1.15; group.add(mast);
+  const rotor = new THREE.Group(); rotor.position.y = 1.55;
+  for (const rz of [0, Math.PI / 2]) {
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(11, 0.05, 0.5), dark);
+    blade.rotation.y = rz; rotor.add(blade);
+  }
+  const disc = new THREE.Mesh(new THREE.CircleGeometry(5.5, 24),
+    new THREE.MeshBasicMaterial({ color: 0x222222, transparent: true, opacity: 0.18, depthWrite: false }));
+  disc.rotation.x = -Math.PI / 2; rotor.add(disc);
   group.add(rotor);
-  const disc = new THREE.Mesh(
-    new THREE.CircleGeometry(3.9, 24),
-    new THREE.MeshBasicMaterial({ color: 0xe8e8e8, transparent: true, opacity: 0.16, depthWrite: false }),
-  );
-  disc.rotation.x = -Math.PI / 2;
-  disc.position.y = 1.27;
-  group.add(disc);
-  const strobe = new THREE.Mesh(new THREE.SphereGeometry(0.14, 6, 5), new THREE.MeshBasicMaterial({ color: 0xff3040 }));
-  strobe.position.set(0, 1.6, -6.5);
-  group.add(strobe);
-  // Searchlight cone (f3): apex at the belly, base radius 6.5 m on the
-  // ground 37 m below cruise height. Additive, no real light.
-  const cone = new THREE.Mesh(
-    new THREE.ConeGeometry(5, 37, 20, 1, true),
-    // FrontSide + low opacity: DoubleSide at 0.10 stacked into a solid grey
-    // lampshade in the first staged chase frame (Tahap 4 QA).
-    new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.055, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.FrontSide }),
-  );
-  cone.position.y = -18.5;
-  cone.visible = false;
-  group.add(cone);
+  const strobe = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: radialGlowTexture('rgba(255,80,80,1)'), color: 0xff4040, transparent: true,
+    opacity: 0.9, blending: THREE.AdditiveBlending, depthWrite: false }));
+  strobe.position.set(0, 0.9, -6.6); strobe.scale.setScalar(1.6); group.add(strobe);
   group.visible = false;
   scene.add(group);
-  const pool = new THREE.Mesh(
-    new THREE.CircleGeometry(5, 20),
-    new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.1, blending: THREE.AdditiveBlending, depthWrite: false }),
-  );
-  pool.rotation.x = -Math.PI / 2;
-  pool.position.y = 0.14;
-  pool.visible = false;
-  scene.add(pool);
-  return {
-    group, rotor, tailRotor, cone, pool,
-    t: 0, angle: 0, active: false, awayTimer: 0, wasActive: false,
-  };
-}
+  // Searchlight: an additive cone from the belly to the ground plus a
+  // bright pool that tracks the target. No real light is added.
+  const cone = new THREE.Mesh(new THREE.ConeGeometry(7.5, 38, 20, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.10, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+  cone.visible = false; scene.add(cone);
+  const pool = new THREE.Mesh(new THREE.CircleGeometry(6.4, 22),
+    new THREE.MeshBasicMaterial({ color: 0xfff2c0, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false }));
+  pool.rotation.x = -Math.PI / 2; pool.position.y = 0.14; pool.visible = false; scene.add(pool);
 
-export function stepHeli(heli, dt, target, stars) {
-  heli.t += dt;
-  const want = stars >= 3;
-  if (want) {
-    heli.active = true;
-    heli.awayTimer = 0;
-  } else if (heli.active) {
-    // Lingers 4 s after the heat drops below 3 stars, then leaves (f2).
-    heli.awayTimer += dt;
-    if (heli.awayTimer > 4) heli.active = false;
-  }
-  heli.group.visible = heli.active;
-  const lit = heli.active && stars >= 3;
-  heli.cone.visible = lit;
-  heli.pool.visible = lit;
-  if (!heli.active) {
-    heli.wasActive = false;
-    return;
-  }
-  if (!heli.wasActive) {
-    // Arrive already on station behind the player instead of flying in
-    // from the world origin.
-    heli.group.position.set(target.x - 20, 36, target.z - 26);
-    heli.wasActive = true;
-  }
-  heli.angle += dt * 0.45;
-  const R = 34;
-  const tx = target.x + Math.sin(heli.angle) * R;
-  const tz = target.z + Math.cos(heli.angle) * R;
-  const ty = 36 + Math.sin(heli.t * 0.7) * 1.5;
-  const k = Math.min(1, dt * 2.5);
-  heli.group.position.x += (tx - heli.group.position.x) * k;
-  heli.group.position.y += (ty - heli.group.position.y) * k;
-  heli.group.position.z += (tz - heli.group.position.z) * k;
-  heli.group.rotation.y = Math.atan2(target.x - heli.group.position.x, target.z - heli.group.position.z);
-  heli.rotor.rotation.y += dt * 28;
-  heli.tailRotor.rotation.x += dt * 40;
-  heli.pool.position.x = target.x;
-  heli.pool.position.z = target.z;
+  const heli = {
+    group, cone, pool, active: false, angle: 0.6, leaveTimer: 0, rotorSpin: 0,
+    step(dt, target, stars, time) {
+      const want = stars >= 3;
+      if (want) { heli.active = true; heli.leaveTimer = 0; }
+      else if (heli.active) {
+        heli.leaveTimer += dt;
+        if (heli.leaveTimer > 4) heli.active = false;
+      }
+      group.visible = heli.active;
+      const lit = heli.active && stars >= 3;
+      cone.visible = lit; pool.visible = lit;
+      if (!heli.active) return;
+      heli.angle += dt * 0.22;
+      heli.rotorSpin += dt * 28;
+      rotor.rotation.y = heli.rotorSpin;
+      tailRotor.rotation.x = heli.rotorSpin * 1.7;
+      strobe.material.opacity = (Math.floor(time * 2.4) % 2 === 0) ? 0.95 : 0.15;
+      const R = 33;
+      const hx = target.x + Math.sin(heli.angle) * R;
+      const hz = target.z + Math.cos(heli.angle) * R;
+      const k = Math.min(1, dt * 2.2);
+      group.position.x += (hx - group.position.x) * k;
+      group.position.z += (hz - group.position.z) * k;
+      group.position.y = 36;
+      group.lookAt(target.x, 0, target.z);
+      if (lit) { // aim the cone from the belly down to the target
+        cone.position.set((group.position.x + target.x) / 2, 18, (group.position.z + target.z) / 2);
+        cone.lookAt(target.x, 0, target.z);
+        cone.rotateX(-Math.PI / 2);
+        pool.position.set(target.x, 0.14, target.z);
+      }
+    },
+  };
+  group.position.set(0, 36, 240);
+  return heli;
 }

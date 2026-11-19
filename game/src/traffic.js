@@ -1,142 +1,98 @@
-// Traffic: AI cars that cruise the road grid, turn at intersections, and slow
-// for the car ahead. Parked cars line the kerbs for the player to steal. Each
-// traffic car owns a car object from vehicles.js and a simple route state.
-import { createCar, syncCarMesh } from './vehicles.js';
-import { CITY, PALETTE, SUNSET } from './config.js';
-import { roadCentres, isOnRoad } from './world.js';
+// traffic.js — ambient cars that follow the road grid, plus the parked
+// cars the player can steal. Moving cars pick a random turn at each
+// intersection, slow down behind the car ahead, and recycle around the
+// player so the streets near Luz are never empty for long.
+import { CITY, CAR_COLORS } from './config.js';
+import { createCar, driveCar, syncCarMesh } from './vehicles.js';
+import { clamp, headingTo } from './random.js';
 
-// v2: pick a body style for ambient traffic (shots stage their own kinds).
-function pickKind(rng) {
-  const r = rng.next();
-  return r < 0.55 ? 'sedan' : r < 0.8 ? 'hatch' : 'van';
-}
-
-// Stage one moving traffic car at an exact spot (used by shots.js to put
-// traffic in frame). Deterministic: colour/speed come from the caller.
-export function spawnTrafficCar(scene, traffic, x, z, heading, color, speed, kind = 'sedan') {
-  const car = createCar(scene, x, z, heading, color, false, kind);
-  car.driver = 'traffic';
-  car.speed = speed;
-  car.cruise = speed;
-  car.horizontal = Math.abs(Math.sin(heading)) > 0.7;
-  car.road = car.horizontal ? z : x;
-  car.dir = 1;
-  traffic.cars.push(car);
-  traffic.all.push(car);
-  return car;
-}
-
-export function createTraffic(scene, rng, world) {
-  const centres = roadCentres();
-  const cars = [];
-  const half = world.half;
-  // Moving traffic: pick a road, a direction, a lane offset.
-  for (let i = 0; i < 12; i += 1) {
-    const horizontal = rng.next() < 0.5;
-    const road = rng.pick(centres);
-    const along = rng.range(-half, half);
-    const dir = rng.next() < 0.5 ? 1 : -1;
-    const lane = rng.next() < 0.5 ? -2.2 : 2.2;
-    const x = horizontal ? along : road + lane;
-    const z = horizontal ? road + lane : along;
-    const heading = horizontal ? (dir > 0 ? Math.PI / 2 : -Math.PI / 2) : dir > 0 ? 0 : Math.PI;
-    const car = createCar(scene, x, z, heading, rng.pick(PALETTE.carColors), false, pickKind(rng));
-    car.driver = 'traffic';
-    car.speed = rng.range(7, 12);
-    car.cruise = car.speed;
-    car.horizontal = horizontal;
-    car.road = road;
-    car.dir = dir;
-    cars.push(car);
+const PARKED_SPOTS = [];
+export function createTraffic(scene, world, rng) {
+  const all = [];
+  // One Alisio GT hero car parked by the spawn, then a spread of parked
+  // cars along the road edges all over the city.
+  const hero = createCar(scene, 'sport', 0xd81b60, 16, 168, Math.PI / 2, { static: true });
+  hero.parked = true; all.push(hero);
+  const kinds = ['sedan', 'hatch', 'van', 'taxi'];
+  let placed = 0; let guard = 0;
+  while (placed < 21 && guard < 300) {
+    guard += 1;
+    const c = rng.pick(CITY.roadCentres);
+    const t = rng.range(-185, 185);
+    const vertical = rng.chance(0.5);
+    const side = rng.chance(0.5) ? 5.4 : -5.4;
+    const x = vertical ? c + side : t;
+    const z = vertical ? t : c + side;
+    if (Math.hypot(x - 4, z - 178) < 16) continue;
+    if (all.some((o) => Math.hypot(o.pos.x - x, o.pos.z - z) < 9)) continue;
+    const car = createCar(scene, rng.pick(kinds), rng.pick(CAR_COLORS), x, z,
+      vertical ? (side > 0 ? 0 : Math.PI) : (side > 0 ? Math.PI / 2 : -Math.PI / 2), { static: true });
+    car.parked = true; all.push(car); placed += 1;
   }
-  // Parked cars along kerbs, free for the taking.
-  const parked = [];
+  // Moving traffic.
   for (let i = 0; i < 10; i += 1) {
-    const horizontal = rng.next() < 0.5;
-    const road = rng.pick(centres);
-    const along = rng.range(-half + 20, half - 20);
-    const side = rng.next() < 0.5 ? -1 : 1;
-    const x = horizontal ? along : road + side * (CITY.roadHalf - 1.5);
-    const z = horizontal ? road + side * (CITY.roadHalf - 1.5) : along;
-    const heading = horizontal ? (side > 0 ? Math.PI / 2 : -Math.PI / 2) : side > 0 ? 0 : Math.PI;
-    // v5 (c3): the FIRST parked car is always the hero sport, parked by the
-    // spawn kerb in Rosa Neón — stealable like any other car; the sport kind
-    // exists nowhere else in free play (PLAN Lampiran A.5).
-    const isHero = i === 0;
-    const car = createCar(scene, x, z, heading, isHero ? SUNSET.heroColor : rng.pick(PALETTE.carColors), false, isHero ? 'sport' : pickKind(rng));
-    if (isHero) {
-      car.pos.x = 5.6;
-      car.pos.z = 178;
-      car.heading = Math.PI;
-      syncCarMesh(car);
-    }
-    car.parked = true;
-    car.driver = null;
-    parked.push(car);
+    const vertical = i % 2 === 0;
+    const c = rng.pick(CITY.roadCentres);
+    const car = createCar(scene, rng.pick(kinds), rng.pick(CAR_COLORS),
+      vertical ? c : rng.range(-180, 180), vertical ? rng.range(-180, 180) : c,
+      vertical ? 0 : Math.PI / 2);
+    car.route = { vertical, line: c, dir: 1 };
+    car.cruise = rng.range(10, 14);
+    all.push(car);
   }
-  return { cars, parked, all: [...cars, ...parked] };
-}
-
-export function stepTraffic(traffic, dt, world, playerCar) {
-  const centres = roadCentres();
-  const half = world.half;
-  for (const car of traffic.cars) {
-    // Slow for the car ahead (any car within 10 m in front).
-    let ahead = false;
-    for (const other of traffic.all) {
-      if (other === car || other.driver === null) continue;
-      const dx = other.pos.x - car.pos.x;
-      const dz = other.pos.z - car.pos.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist < 11) {
-        const fx = Math.sin(car.heading);
-        const fz = Math.cos(car.heading);
-        if (dx * fx + dz * fz > 0) ahead = true;
+  function step(dt, playerPos, time) {
+    for (const car of all) {
+      if (car.playerDriven) { syncCarMesh(car, time); continue; }
+      if (car.parked) { syncCarMesh(car, time); continue; }
+      const r = car.route;
+      // Recycle cars that drift too far from the player.
+      const dPlayer = Math.hypot(car.pos.x - playerPos.x, car.pos.z - playerPos.z);
+      if (dPlayer > 280) {
+        const c = CITY.roadCentres[Math.floor(Math.random() * CITY.roadCentres.length)];
+        r.vertical = Math.random() < 0.5; r.line = c; r.dir = 1;
+        car.pos.x = r.vertical ? c : playerPos.x + (Math.random() < 0.5 ? -120 : 120);
+        car.pos.z = r.vertical ? playerPos.z + (Math.random() < 0.5 ? -120 : 120) : c;
+        car.speed = 0;
       }
-    }
-    if (playerCar && Math.hypot(playerCar.pos.x - car.pos.x, playerCar.pos.z - car.pos.z) < 9) {
-      const dx = playerCar.pos.x - car.pos.x;
-      const dz = playerCar.pos.z - car.pos.z;
-      if (dx * Math.sin(car.heading) + dz * Math.cos(car.heading) > 0) ahead = true;
-    }
-    const target = ahead ? 0 : car.cruise;
-    car.speed += (target - car.speed) * Math.min(1, dt * 1.5);
-    let nx = car.pos.x + Math.sin(car.heading) * car.speed * dt;
-    let nz = car.pos.z + Math.cos(car.heading) * car.speed * dt;
-    // At an intersection, sometimes turn onto the crossing road.
-    const nearCentre = centres.some((c) => Math.abs((car.horizontal ? nz : nx) - c) < 1.2);
-    if (nearCentre && car.speed > 1 && Math.random() < 0.002) {
-      car.horizontal = !car.horizontal;
-      car.road = car.horizontal ? nz : nx;
-      car.heading += (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
-      car.dir = Math.random() < 0.5 ? 1 : -1;
-    }
-    // Wrap around the city edge instead of driving into the sea.
-    if (nx > half + 20 || nx < -half - 20 || nz > half + 20 || nz < -half - 20) {
-      car.heading += Math.PI;
-      nx = car.pos.x;
-      nz = car.pos.z;
-    }
-    const fixed = world.collide(nx, nz, 2.0);
-    car.pos.x = fixed.x;
-    car.pos.z = fixed.z;
-    syncCarMesh(car);
-  }
-}
-
-export function nearestCar(cars, x, z, maxDist) {
-  let best = null;
-  let bestD = maxDist;
-  for (const car of cars) {
-    const d = Math.hypot(car.pos.x - x, car.pos.z - z);
-    if (d < bestD) {
-      bestD = d;
-      best = car;
+      // Target point: far ahead along the current road line.
+      const ahead = 60;
+      const targetX = r.vertical ? r.line : car.pos.x + Math.sin(car.heading) * ahead;
+      const targetZ = r.vertical ? car.pos.z + Math.cos(car.heading) * ahead : r.line;
+      const desired = headingTo(car.pos.x, car.pos.z, targetX, targetZ);
+      let err = desired - car.heading;
+      while (err > Math.PI) err -= Math.PI * 2;
+      while (err < -Math.PI) err += Math.PI * 2;
+      // Slow down if another car is close ahead.
+      let blocked = false;
+      for (const o of all) {
+        if (o === car) continue;
+        const d = Math.hypot(o.pos.x - car.pos.x, o.pos.z - car.pos.z);
+        if (d < 7) {
+          const a = headingTo(car.pos.x, car.pos.z, o.pos.x, o.pos.z);
+          if (Math.abs(((a - car.heading + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.6) blocked = true;
+        }
+      }
+      const input = {
+        forward: !blocked && car.speed < car.cruise,
+        back: blocked && car.speed > 1,
+        left: err > 0.12, right: err < -0.12, brake: false,
+      };
+      // At an intersection, sometimes turn onto the crossing road.
+      const nearCross = CITY.roadCentres.some((c) => Math.abs((r.vertical ? car.pos.z : car.pos.x) - c) < 2.2);
+      driveCar(car, input, dt, world);
+      if (nearCross && Math.random() < 0.008) {
+        const cross = r.vertical ? car.pos.z : car.pos.x;
+        const snapped = CITY.roadCentres.reduce((best, c) => (Math.abs(c - cross) < Math.abs(best - cross) ? c : best), CITY.roadCentres[0]);
+        r.vertical = !r.vertical; r.line = snapped;
+      }
+      if (car.pos.x > CITY.extent + 30 || car.pos.x < -CITY.extent - 30 ||
+          car.pos.z > CITY.extent + 40 || car.pos.z < -CITY.extent - 30) {
+        r.dir = -r.dir; car.heading += Math.PI;
+      }
+      syncCarMesh(car, time);
     }
   }
-  return best;
+  return { all, step };
 }
-
-export function isOnRoadAt(x, z) {
-  return isOnRoad(x, z);
-}
+export { PARKED_SPOTS };
+export const trafficClamp = clamp;

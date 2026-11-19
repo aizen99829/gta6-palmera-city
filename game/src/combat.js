@@ -1,114 +1,84 @@
-// Combat: fists and two guns. Punch (F) knocks down the nearest pedestrian
-// in reach and lifts a little cash; shooting is a hitscan shot toward the
-// camera's aim — the nearest pedestrian or police cruiser in the cone
-// takes the hit. Both raise the wanted heat; the HUD ammo counter reads
-// from here. v5.1 (P5): the pistol (key 2) is joined by a real SMG
-// (key 3, Rosa's gift when CH3 opens) — automatic fire, a 32-round
-// magazine, weaker per-round cruiser slow. `ammo`/`magSize` always
-// describe the ACTIVE weapon; the other's rounds wait in `stash`.
-import { nearestPed } from './pedestrians.js';
-import { MONEY, WANTED, WEAPONS } from './config.js';
+// combat.js — Luz's two real guns. The pistol "La Chica" is hers from
+// the start (12-round mag, semi-auto feel via a 0.28 s gate). The SMG
+// "La Ráfaga" is Rosa's gift when CH3 opens: 32-round mag, full-auto at
+// ~12 rounds a second. Each weapon keeps its own magazine across
+// switches; an empty mag auto-reloads. Hits are hitscan along the aim
+// direction and slow cruisers by the weapon's factor.
+import * as THREE from 'three';
+import { WEAPONS } from './config.js';
+import { clamp } from './random.js';
 
-export function createCombat() {
-  return {
-    weapon: 'pistol',
-    ammo: WEAPONS.pistol.magSize,
-    magSize: WEAPONS.pistol.magSize,
-    stash: { pistol: WEAPONS.pistol.magSize, smg: WEAPONS.smg.magSize },
-    smgUnlocked: false,
-    fireTimer: 0,
-    reloadTimer: 0, flash: 0, lastShot: '', tracerFrom: null, tracerTo: null,
+export function createCombat(scene) {
+  const mags = { pistol: WEAPONS.pistol.mag, smg: WEAPONS.smg.mag };
+  const flash = new THREE.Mesh(new THREE.SphereGeometry(0.16, 8, 6),
+    new THREE.MeshBasicMaterial({ color: 0xffd76a }));
+  flash.visible = false; scene.add(flash);
+  const tracerMat = new THREE.LineBasicMaterial({ color: 0xffe9a0, transparent: true, opacity: 0.9 });
+  const tracerGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+  const tracer = new THREE.Line(tracerGeo, tracerMat);
+  tracer.visible = false; scene.add(tracer);
+  const combat = {
+    weapon: 'pistol', ammo: mags.pistol, reloadTimer: 0, fireTimer: 0,
+    unlockedSmg: false, tracerTimer: 0, lastShotHit: false,
+    switchTo(name) {
+      if (name === combat.weapon) return false;
+      if (name === 'smg' && !combat.unlockedSmg) return false;
+      mags[combat.weapon] = combat.ammo;
+      combat.weapon = name;
+      combat.ammo = mags[name];
+      combat.fireTimer = Math.max(combat.fireTimer, 0.25); // swap pause
+      combat.reloadTimer = 0;
+      return true;
+    },
+    startReload() {
+      const W = WEAPONS[combat.weapon];
+      if (combat.reloadTimer <= 0 && combat.ammo < W.mag) combat.reloadTimer = W.reload;
+    },
+    // ctx: { origin {x,z}, aimYaw, targets: [{pos, radius, car?}], onEvent }
+    update(dt, firing, ctx) {
+      combat.fireTimer = Math.max(0, combat.fireTimer - dt);
+      combat.tracerTimer = Math.max(0, combat.tracerTimer - dt);
+      if (combat.tracerTimer <= 0) { tracer.visible = false; flash.visible = false; }
+      if (combat.reloadTimer > 0) {
+        combat.reloadTimer = Math.max(0, combat.reloadTimer - dt);
+        if (combat.reloadTimer <= 0) {
+          combat.ammo = WEAPONS[combat.weapon].mag;
+          mags[combat.weapon] = combat.ammo;
+        }
+        return null;
+      }
+      if (!firing || combat.fireTimer > 0) return null;
+      const W = WEAPONS[combat.weapon];
+      if (combat.ammo <= 0) { // empty click, then the auto-reload kicks in
+        combat.startReload();
+        return { type: 'dry' };
+      }
+      combat.ammo -= 1; mags[combat.weapon] = combat.ammo;
+      combat.fireTimer = W.rate;
+      combat.tracerTimer = 0.05;
+      // Hitscan: nearest target inside a narrow cone along the aim.
+      const ox = ctx.origin.x; const oz = ctx.origin.z;
+      const fx = Math.sin(ctx.aimYaw); const fz = Math.cos(ctx.aimYaw);
+      let best = null; let bestT = 70;
+      for (const t of ctx.targets) {
+        const dx = t.pos.x - ox; const dz = t.pos.z - oz;
+        const along = dx * fx + dz * fz;
+        if (along < 1 || along > bestT) continue;
+        const perp = Math.abs(dx * fz - dz * fx);
+        if (perp < (t.radius || 1.6)) { best = t; bestT = along; }
+      }
+      const endX = ox + fx * bestT; const endZ = oz + fz * bestT;
+      const pts = [new THREE.Vector3(ox, 1.45, oz), new THREE.Vector3(endX, 1.1, endZ)];
+      tracer.geometry.setFromPoints(pts); tracer.visible = true;
+      flash.position.set(ox + fx * 0.7, 1.45, oz + fz * 0.7); flash.visible = true;
+      if (combat.ammo <= 0) combat.startReload();
+      if (best) {
+        if (best.car) best.car.speed *= W.slow;
+        return { type: 'hit', target: best, dist: bestT };
+      }
+      return { type: 'shot' };
+    },
   };
+  return combat;
 }
-
-export function switchWeapon(combat, name) {
-  if (!WEAPONS[name] || name === combat.weapon) return false;
-  if (name === 'smg' && !combat.smgUnlocked) return false;
-  combat.stash[combat.weapon] = combat.ammo;
-  combat.weapon = name;
-  combat.magSize = WEAPONS[name].magSize;
-  combat.ammo = combat.stash[name];
-  combat.fireTimer = Math.max(combat.fireTimer, 0.25); // the swap itself takes a beat
-  return true;
-}
-
-export function tryPunch(combat, player, peds, state) {
-  if (player.punchTimer > 0) return;
-  player.punchTimer = 0.35;
-  const fx = Math.sin(player.heading);
-  const fz = Math.cos(player.heading);
-  const ped = nearestPed(peds, player.pos.x + fx * 1.5, player.pos.z + fz * 1.5, 2.6);
-  if (!ped) return;
-  ped.down = 4;
-  ped.mesh.rotation.x = -Math.PI / 2 + 0.2;
-  state.money += MONEY.punchLoot;
-  state.heat = Math.min(100, state.heat + WANTED.punch);
-  state.message = `+$${MONEY.punchLoot} lifted`;
-  state.messageTimer = 2;
-}
-
-// Returns true when a round actually left the barrel (the caller plays
-// the shot sound only then — the SMG's automatic fire depends on it).
-export function tryShoot(combat, origin, dir, peds, policeCars, state) {
-  if (combat.reloadTimer > 0 || combat.ammo <= 0 || combat.fireTimer > 0) return false;
-  const gun = WEAPONS[combat.weapon] || WEAPONS.pistol;
-  combat.fireTimer = gun.interval;
-  combat.ammo -= 1;
-  combat.flash = 0.12;
-  let best = null;
-  let bestD = 45;
-  let bestKind = '';
-  for (const ped of peds) {
-    if (ped.down > 0) continue;
-    const dx = ped.pos.x - origin.x;
-    const dz = ped.pos.z - origin.z;
-    const d = Math.hypot(dx, dz);
-    if (d < bestD && d > 0.5) {
-      const dot = (dx * dir.x + dz * dir.z) / d;
-      if (dot > 0.92) { best = ped; bestD = d; bestKind = 'ped'; }
-    }
-  }
-  for (const car of policeCars) {
-    const dx = car.pos.x - origin.x;
-    const dz = car.pos.z - origin.z;
-    const d = Math.hypot(dx, dz);
-    if (d < bestD && d > 0.5) {
-      const dot = (dx * dir.x + dz * dir.z) / d;
-      if (dot > 0.9) { best = car; bestD = d; bestKind = 'police'; }
-    }
-  }
-  if (bestKind === 'ped') {
-    best.down = 6;
-    best.mesh.rotation.x = -Math.PI / 2 + 0.2;
-    state.heat = Math.min(100, state.heat + WANTED.shoot);
-    state.message = 'Shot fired — the PD heard that';
-    state.messageTimer = 2;
-  } else if (bestKind === 'police') {
-    best.speed *= gun.cruiserSlow; // pistol 0.4 (one hard hit), SMG 0.82 (sustained fire)
-    state.heat = Math.min(100, state.heat + WANTED.shoot);
-    state.message = 'You hit a cruiser!';
-    state.messageTimer = 2;
-  } else {
-    state.heat = Math.min(100, state.heat + 4);
-  }
-  // Tracer: muzzle to the hit (or 30 m downrange on a miss), so the shot
-  // reads in a still frame, not just while the flash is up.
-  combat.tracerFrom = { x: origin.x + dir.x * 1.2, y: 1.4, z: origin.z + dir.z * 1.2 };
-  combat.tracerTo = best
-    ? { x: best.pos.x, y: 1.2, z: best.pos.z }
-    : { x: origin.x + dir.x * 30, y: 1.2, z: origin.z + dir.z * 30 };
-  if (combat.ammo === 0) {
-    combat.reloadTimer = 1.4;
-    combat.ammo = combat.magSize;
-  }
-  return true;
-}
-
-export function stepCombat(combat, dt) {
-  combat.flash = Math.max(0, combat.flash - dt);
-  combat.fireTimer = Math.max(0, combat.fireTimer - dt);
-  if (combat.reloadTimer > 0) {
-    combat.reloadTimer -= dt;
-    if (combat.reloadTimer <= 0) combat.ammo = combat.magSize;
-  }
-}
+export const combatClamp = clamp;

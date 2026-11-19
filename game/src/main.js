@@ -1,537 +1,390 @@
-// Palmera City — boot and the one loop. Input is read every frame, the world
-// advances in fixed 1/60 s steps, the renderer paints what is there. Screens:
-// start, play, paused, busted. ?shot=chase|street|mission|start (with &seed=N)
-// stages that scene from the real game instead of running the loop, paints it
-// a few times and sets window.__shotReady for a screenshot.
-import * as THREE from 'three';
-import { CITY, CLOCK_START, MISSIONS, MONEY, NAMES, PLAYER, RADIO, SAVE_KEY, STEP, WANTED, WEAPONS, districtOf } from './config.js';
-import { createRandom } from './random.js';
+// main.js — bootstrap and the one owner of game state. Builds every
+// module, runs the fixed-step loop, moves money/heat/health only here,
+// handles enter/exit car, busts, dialogs, autosave and the HUD data
+// contract. Also exposes the test/staging hooks window.__game and
+// window.__palmera.
+import { CITY, CLOCK_START, CRIME_HEAT, DIALOG, HEAT_DECAY, HEAT_MAX,
+  HEAT_PER_STAR, KINDS, MISSIONS, RADIO, SAVE_KEY, SPAWN, STAR_MAX,
+  START_MONEY, BUST_FINE, WEAPONS, districtOf } from './config.js';
+import { makeRng, seedFromUrl, clamp } from './random.js';
+import { createRender, createBeacon } from './render.js';
 import { createWorld } from './world.js';
-import { createPlayer, stepPlayer } from './player.js';
-import { attachPlayerStreak, createCar, detachPlayerStreak, driveCar, carSpeedKmh } from './vehicles.js';
-import { createTraffic, stepTraffic, nearestCar } from './traffic.js';
-import { createPedestrians, stepPedestrians } from './pedestrians.js';
-import { createPolice, stepPolice } from './police.js';
-import { createMissions, currentMission, currentStep, dialogFor, missionText, nextStepText, stepMissions, waypointOf } from './missions.js';
-import { policeStatus } from './police.js';
-import { createCombat, switchWeapon, tryPunch, tryShoot, stepCombat } from './combat.js';
+import { createTraffic } from './traffic.js';
+import { createPlayer, stepPlayer, syncPlayerToCar } from './player.js';
+import { driveCar } from './vehicles.js';
+import { createPolice, policeStatus } from './police.js';
+import { createHeli } from './heli.js';
+import { createPeds } from './pedestrians.js';
+import { createCombat } from './combat.js';
+import { createMissions, dialogKeyForChapter } from './missions.js';
 import { createHud } from './hud.js';
-import { createHeli, stepHeli } from './heli.js';
+import { createInput } from './input.js';
 import { createAudio } from './audio.js';
-import { createRender } from './render.js';
-import { setMaxAnisotropy } from './textures.js';
-import { ACTION_CONFIRM, ACTION_ENTER_CAR, ACTION_PAUSE, ACTION_PUNCH, ACTION_RELOAD, ACTION_SHOOT, ACTION_WEAPON_PISTOL, ACTION_WEAPON_SMG, createInput } from './input.js';
-import { stageShot } from './shots.js';
+import { readShotParam, stageShot } from './shots.js';
 
-const MAX_FRAME = 0.25;
-const params = new URLSearchParams(window.location.search);
-const shot = params.get('shot');
-const seedParam = Number.parseInt(params.get('seed') ?? '', 10);
-const seed = Number.isInteger(seedParam) ? seedParam : Math.floor(Math.random() * 4294967296);
-
-const canvas = document.getElementById('game');
-const status = document.getElementById('status');
-const rng = createRandom(seed);
-const render = createRender(canvas);
-setMaxAnisotropy(render.renderer.capabilities.getMaxAnisotropy()); // v5.2: before any texture is built
+const seed = seedFromUrl();
+const rng = makeRng(seed);
+const app = document.getElementById('app');
+const render = createRender(app);
+render.canvas.classList.add('webgl');
 const world = createWorld(render.scene, rng);
-const hud = createHud(world); // v5: the minimap pre-renders from world data
-const audio = createAudio();
-const input = createInput(canvas);
+const traffic = createTraffic(render.scene, world, rng);
+const peds = createPeds(render.scene, world, rng);
+const police = createPolice(render.scene, world);
+const heli = createHeli(render.scene);
 const player = createPlayer(render.scene);
-const traffic = createTraffic(render.scene, rng, world);
-const peds = createPedestrians(render.scene, rng, world);
-const police = createPolice(render.scene);
-const heli = createHeli(render.scene); // v5: visual-only air unit (f1–f3)
+const combat = createCombat(render.scene);
 const missions = createMissions();
-const combat = createCombat();
+const beacon = createBeacon(render.scene);
+const hud = createHud(world);
+const input = createInput(render.canvas);
+const audio = createAudio();
 
 const state = {
-  screen: 'start',
-  money: MONEY.start,
-  health: PLAYER.maxHealth,
-  heat: 0,
-  clockMin: CLOCK_START, // v5: the day opens inside the sunset window (a6)
-  day: 1,
-  message: '',
-  messageTimer: 0,
-  crashTimer: 0, // crash damage at most once per half second: a pinned car
-  // scraping a wall must not bleed out in a second of taps
-  saveTimer: 0,
-  time: 0,
-  // v5 (g5): the dialog bar's current line + how long it stays up, and the
-  // mission index that already showed Rosa's first-3★ line.
-  dialog: null,
-  dialogTimer: 0,
-  dialogHeatMission: -1,
+  screen: 'start', time: 0, money: START_MONEY, health: 100, heat: 0,
+  day: 1, clockMin: CLOCK_START, message: '', messageTimer: 0,
+  dialog: null, dialogTimer: 0, busts: 0, bustTimer: 0, shotCam: null,
+  chapterTime: 0, lastDamageAt: -99, ramCd: 0, saveTimer: 0, started: false,
 };
-const SPAWN = { x: 0, z: 170 };
-player.pos.x = SPAWN.x;
-player.pos.z = SPAWN.z;
-player.camYaw = Math.PI; // face the city from the beach
+const stars = () => (state.heat <= 0 ? 0 : Math.min(STAR_MAX, Math.ceil(state.heat / HEAT_PER_STAR)));
+const seen = () => stars() > 0 && police.cars.some((c) =>
+  Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 45);
+function addHeat(n) { state.heat = clamp(state.heat + n, 0, HEAT_MAX); }
+function setDialog(d, secs = 6) { state.dialog = d; state.dialogTimer = secs; }
+function setMessage(t, secs = 2.6) { state.message = t; state.messageTimer = secs; }
 
-function stars() {
-  return Math.max(0, Math.min(WANTED.max, Math.floor(state.heat / WANTED.heatPerStar)));
-}
-
+// ---------- save / load ----------
 function save() {
   try {
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify({
-      money: state.money, health: state.health,
-      mission: missions.index, step: missions.step,
-      x: player.pos.x, z: player.pos.z,
+    localStorage.setItem(SAVE_KEY, JSON.stringify({
+      x: Math.round(player.pos.x * 10) / 10, z: Math.round(player.pos.z * 10) / 10,
+      money: state.money, missionIndex: missions.index, done: missions.done,
+      smg: combat.unlockedSmg, respect: respect(),
     }));
-  } catch {
-    // Storage off: progress lasts this visit only.
-  }
+  } catch { /* storage unavailable: play on without saving */ }
 }
-
 function load() {
   try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
+    const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return;
     const s = JSON.parse(raw);
     if (typeof s.money === 'number') state.money = s.money;
-    if (typeof s.health === 'number') state.health = s.health > 0 ? s.health : PLAYER.maxHealth; // a save written at 0 health (busted) must not insta-bust the next visit
-    if (typeof s.mission === 'number') missions.index = Math.min(s.mission, MISSIONS.length);
-    if (missions.index >= MISSIONS.length) missions.done = true; // a finished campaign stays finished (v5.1: CH5 exists now)
-    if (typeof s.step === 'number') missions.step = s.step;
-    if (typeof s.x === 'number' && typeof s.z === 'number') {
-      player.pos.x = s.x;
-      player.pos.z = s.z;
+    if (typeof s.missionIndex === 'number') {
+      missions.index = clamp(s.missionIndex, 0, MISSIONS.length);
+      missions.done = !!s.done || missions.index >= MISSIONS.length;
+      missions.step = 0;
     }
-  } catch {
-    // A corrupt save is ignored, not fatal.
-  }
+    if (typeof s.x === 'number' && typeof s.z === 'number') {
+      player.pos.x = s.x; player.pos.z = s.z;
+    }
+    combat.unlockedSmg = !!s.smg || missions.index >= 2;
+  } catch { /* a corrupt save must never block the game */ }
+}
+function respect() {
+  return missions.index * 3 + (missions.done ? 4 : 0) + Math.floor(state.money / 500);
 }
 
-function announce(message) {
-  status.textContent = message;
+// ---------- car entry / exit ----------
+function nearestCar() {
+  let best = null; let bd = 4.5;
+  for (const c of traffic.all) {
+    if (c.playerDriven) continue;
+    const d = Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z);
+    if (d < bd) { bd = d; best = c; }
+  }
+  return best;
 }
-
-function enterCar() {
-  const cars = [...traffic.all, ...police.cars];
-  const car = nearestCar(cars, player.pos.x, player.pos.z, 4.5);
-  if (!car || car.driver === 'police') {
-    audio.denied();
-    return;
-  }
-  if (car.driver === 'traffic') {
-    const i = traffic.cars.indexOf(car);
-    if (i >= 0) traffic.cars.splice(i, 1);
-  }
-  car.driver = 'player';
-  car.parked = false;
+function enterCar(car) {
+  if (!car || player.inCar) return;
   player.inCar = car;
-  player.mesh.visible = false; // she is in the seat, not standing at the door
-  attachPlayerStreak(car); // v5 (b3): pink road streak + headlight beam
-  if (!car.stolen) {
-    car.stolen = true;
-    state.heat = Math.min(100, state.heat + WANTED.stealCar);
-    state.message = 'Car stolen — the PD is watching';
-    state.messageTimer = 3;
-  }
-  audio.pickup();
+  car.playerDriven = true; car.parked = false;
+  player.mesh.visible = false;
+  if (!car.stolen) { car.stolen = true; addHeat(CRIME_HEAT.steal); }
+  syncPlayerToCar(player, car);
+  audio.ensure();
+  save();
 }
-
 function exitCar() {
   const car = player.inCar;
   if (!car) return;
-  detachPlayerStreak(car);
-  car.driver = null;
-  car.parked = true;
-  if (!traffic.all.includes(car)) traffic.all.push(car);
-  player.inCar = null;
-  const sx = Math.cos(car.heading) * 2.5;
-  const sz = -Math.sin(car.heading) * 2.5;
+  const px = Math.cos(car.heading); const pz = -Math.sin(car.heading); // perpendicular
   let placed = false;
-  for (const s of [1, -1]) {
-    if (!world.hitsBuilding(car.pos.x + sx * s, car.pos.z + sz * s, PLAYER.radius)) {
-      player.pos.x = car.pos.x + sx * s;
-      player.pos.z = car.pos.z + sz * s;
-      placed = true;
-      break;
-    }
+  for (const side of [1, -1]) {
+    const cand = { x: car.pos.x + px * 2.5 * side, z: car.pos.z + pz * 2.5 * side };
+    if (!world.hitsBuilding(cand, player.radius)) { player.pos.x = cand.x; player.pos.z = cand.z; placed = true; break; }
   }
   if (!placed) {
-    const fixed = world.collide(car.pos.x + sx, car.pos.z + sz, PLAYER.radius);
-    player.pos.x = fixed.x;
-    player.pos.z = fixed.z;
+    player.pos.x = car.pos.x + px * 2.5; player.pos.z = car.pos.z + pz * 2.5;
+    world.collide(player.pos, player.radius);
   }
-  player.camYaw = car.heading;
+  player.heading = car.heading;
+  player.mesh.visible = true;
+  car.playerDriven = false; car.parked = true; car.speed = 0;
+  player.inCar = null;
 }
 
-function bust() {
+// ---------- flow ----------
+function startGame() {
+  if (state.screen === 'play') return;
+  state.screen = 'play'; state.started = true;
+  hud.showScreen(null);
+  input.setTouchVisible(true);
+  audio.ensure(); audio.ui();
+  if (missions.index === 0 && missions.step === 0 && state.time < 1) setDialog(DIALOG.m1_start, 7);
+}
+function bust(kind) {
   if (state.screen !== 'play') return;
   state.screen = 'busted';
-  audio.busted();
-  audio.setEngine(0, false);
-  audio.setSiren(false, 0);
-  state.money = Math.max(0, state.money - 100);
-  announce('Busted. The Palmera PD caught Luz.');
-  hud.showScreen('busted');
+  state.busts += 1;
+  state.money = Math.max(0, state.money - BUST_FINE);
+  state.heat = 0; state.bustTimer = 0;
+  if (player.inCar) { const c = player.inCar; c.playerDriven = false; c.parked = true; c.speed = 0; player.inCar = null; player.mesh.visible = true; }
+  state.health = 100;
+  hud.showScreen('busted', kind === 'wasted'
+    ? { title: 'WASTED', sub: 'Kamu tumbang di jalanan Palmera. Biaya medis $100.' }
+    : { title: 'BUSTED', sub: 'Palmera PD menahanmu. Denda $100.' });
+  input.setTouchVisible(false);
   save();
 }
-
-function showDialog(entry) {
-  if (!entry) return;
-  state.dialog = entry;
-  state.dialogTimer = 5;
-}
-
-function startGame() {
+function resumeFromBusted() {
   state.screen = 'play';
-  audio.unlock();
-  hud.showScreen('play');
-  announce('Playing Palmera City.');
-  showDialog(dialogFor(missions, 'start'));
+  hud.showScreen(null);
+  input.setTouchVisible(true);
 }
 
-function restart() {
-  state.health = PLAYER.maxHealth;
-  state.heat = 0;
-  player.pos.x = SPAWN.x;
-  player.pos.z = SPAWN.z;
-  player.camYaw = Math.PI;
-  if (player.inCar) {
-    player.inCar.driver = null;
-    player.inCar = null;
-  }
-  for (const car of police.cars) render.scene.remove(car.mesh);
-  police.cars.length = 0;
-  state.screen = 'play';
-  hud.showScreen('play');
-  announce('Playing Palmera City.');
-}
-
-function missionContext() {
-  const inCar = !!player.inCar;
-  const pos = inCar ? player.inCar.pos : player.pos;
-  // v5.1 (P6): `seen` is the HUD badge's rule — a cruiser within 45 m
-  // while wanted. The CH5 sneak drop reads it.
-  let nearestCop = Infinity;
-  for (const c of police.cars) nearestCop = Math.min(nearestCop, Math.hypot(c.pos.x - pos.x, c.pos.z - pos.z));
-  const starCount = stars();
-  return {
-    x: pos.x, z: pos.z, inCar,
-    stars: starCount,
-    seen: starCount > 0 && nearestCop <= 45,
-    heatStepArmed: missions.index === 2 && missions.step === 1,
-    money: state.money,
-    time: state.time,
-  };
-}
-
+// ---------- per-step update ----------
 function step(dt) {
+  const camDelta = input.takeCam();
+  if (state.screen === 'start') {
+    if (input.take('confirm')) startGame();
+    return;
+  }
+  if (state.screen === 'busted') {
+    if (input.take('confirm')) resumeFromBusted();
+    return;
+  }
+  if (state.screen === 'pause') {
+    if (input.take('pause') || input.take('confirm')) { state.screen = 'play'; hud.showScreen(null); input.setTouchVisible(true); }
+    return;
+  }
+  // screen === 'play'
   state.time += dt;
-  state.clockMin += dt * 2;
-  state.messageTimer = Math.max(0, state.messageTimer - dt);
-  state.crashTimer = Math.max(0, state.crashTimer - dt);
-  // Wanted heat fades while the player stays out of trouble.
-  state.heat = Math.max(0, state.heat - WANTED.decayPerSec * dt);
-  // Player on foot or driving.
-  if (player.inCar) {
-    const hit = driveCar(player.inCar, input, dt, world);
-    player.pos.x = player.inCar.pos.x;
-    player.pos.z = player.inCar.pos.z;
-    if (hit && state.crashTimer <= 0) {
-      state.health = Math.max(0, state.health - 2);
-      state.message = 'Crash!';
-      state.messageTimer = 1;
-      state.crashTimer = 0.5;
+  state.chapterTime += dt;
+  state.clockMin = CLOCK_START + Math.floor(state.time * 0.5);
+  state.day = 1 + Math.floor((state.clockMin - CLOCK_START) / 1440);
+  if (input.take('pause')) { state.screen = 'pause'; hud.showScreen('pause'); input.setTouchVisible(false); return; }
+  player.camYaw -= camDelta.dx * 0.004;
+  player.camPitch = clamp(player.camPitch + camDelta.dy * 0.002, 0.08, 0.9);
+  const car = player.inCar;
+  state.ramCd = Math.max(0, state.ramCd - dt);
+  if (car) {
+    const hitHard = driveCar(car, input.held, dt, world);
+    syncPlayerToCar(player, car);
+    if (hitHard) {
+      audio.crash(true);
+      const cop = police.cars.find((c) => Math.hypot(c.pos.x - car.pos.x, c.pos.z - car.pos.z) < 3.4);
+      if (cop && state.ramCd <= 0) { addHeat(CRIME_HEAT.cruiserRam); state.ramCd = 1.2; }
     }
+    audio.setEngine(true, Math.abs(car.speed) / 38);
   } else {
-    stepPlayer(player, input, dt, world);
-  }
-  // Traffic, pedestrians, police.
-  stepTraffic(traffic, dt, world, player.inCar);
-  const threat = combat.flash > 0 || player.punchTimer > 0
-    ? { x: player.pos.x, z: player.pos.z } : null;
-  stepPedestrians(peds, dt, rng, world, threat);
-  const target = {
-    x: player.inCar ? player.inCar.pos.x : player.pos.x,
-    z: player.inCar ? player.inCar.pos.z : player.pos.z,
-    heading: player.inCar ? player.inCar.heading : player.heading, // v5.1 (P3): roadblocks aim ahead of this
-    inCar: !!player.inCar,
-    onRam: () => {
-      state.health = Math.max(0, state.health - 8);
-      if (player.inCar) {
-        player.inCar.speed *= 0.5;
-        // v5 (g7): a ram dents the condition readout (−4, display only).
-        player.inCar.condition = Math.max(5, (player.inCar.condition ?? 100) - 4);
+    audio.setEngine(false, 0);
+    stepPlayer(player, input.held, dt, world);
+    if (input.aim.down) player.heading = player.camYaw;
+    if (input.take('punch')) {
+      const ped = peds.list.find((p) => p.fallTimer <= 0 &&
+        Math.hypot(p.pos.x - player.pos.x, p.pos.z - player.pos.z) < 2.4);
+      if (ped) {
+        ped.fall(); state.money += 15; addHeat(CRIME_HEAT.punch);
+        audio.punch(); setMessage('Took $15 off a pedestrian');
       }
-      state.message = 'Cruiser rammed you!';
-      state.messageTimer = 1.5;
-    },
-  };
-  const caught = stepPolice(police, dt, render.scene, rng, target, stars(), world);
-  // v5 heli: follows the same target the police chase; purely visual.
-  stepHeli(heli, dt, target, stars());
-  // v5 (d4): palm crowns sway via a whisper of texture offset — zero draw
-  // calls, deterministic in state.time.
-  if (world.palmCrownMat) world.palmCrownMat.map.offset.x = Math.sin(state.time * 0.8) * 0.01;
-  if (caught) {
-    bust();
-    return;
-  }
-  // Missions.
-  const ctx = missionContext();
-  const result = stepMissions(missions, ctx, dt);
-  state.money = ctx.money;
-  if (result) {
-    audio.mission();
-    state.message = missions.message;
-    state.messageTimer = 3;
-    // v5 (g5): story dialog follows mission events.
-    if (result === 'mission') showDialog(dialogFor(missions, 'mission'));
-    else if (result === 'all') showDialog(dialogFor(missions, 'all'));
-    save();
-  }
-  // v5 (g5): Rosa's line the first time Luz hits 3 stars during mission 3.
-  if (missions.index === 2 && state.dialogHeatMission !== 2 && stars() >= 3) {
-    state.dialogHeatMission = 2;
-    showDialog(dialogFor(missions, 'heat3'));
-  }
-  // v5.1 (P5): when CH3 opens, Rosa's SMG becomes Luz's — announced once.
-  if (!combat.smgUnlocked && missions.index >= 2) {
-    combat.smgUnlocked = true;
-    state.message = 'Rosa left you La Ráfaga — press 3 for the SMG';
-    state.messageTimer = 4;
-  }
-  state.dialogTimer = Math.max(0, state.dialogTimer - dt);
-  if (state.dialogTimer <= 0) state.dialog = null;
-  // Combat timers and health regen.
-  stepCombat(combat, dt);
-  if (state.health > 0 && state.health < PLAYER.maxHealth) state.health = Math.min(PLAYER.maxHealth, state.health + dt * 1.5);
-  if (state.health <= 0) {
-    bust();
-    return;
-  }
-  // Audio follows the action.
-  const speed01 = player.inCar ? Math.abs(player.inCar.speed) / 38 : player.moving ? 0.25 : 0;
-  audio.setEngine(speed01, !!player.inCar || player.moving);
-  audio.setSiren(stars() > 0, state.time);
-  // Sea shimmer + lighthouse pulse.
-  world.sea.position.y = 0.02 + Math.sin(state.time * 0.7) * 0.08;
-  world.lamp.material.color.setHex(Math.floor(state.time * 2) % 2 === 0 ? 0xffe9a8 : 0xfffbe0);
-  // Autosave.
-  state.saveTimer += dt;
-  if (state.saveTimer > 5) {
-    state.saveTimer = 0;
-    save();
-  }
-}
-
-function updateCamera(dt) {
-  const waypoint = waypointOf(missions);
-  render.setBeacon(waypoint);
-  render.setFlash(combat.flash > 0
-    ? { x: player.pos.x + Math.sin(player.camYaw) * 2, y: 1.5, z: player.pos.z + Math.cos(player.camYaw) * 2 }
-    : null);
-  render.setTracer(combat.flash > 0 ? combat.tracerFrom : null, combat.flash > 0 ? combat.tracerTo : null);
-  // Shots stage their own framing (closer on foot, higher/further in a chase);
-  // live play always uses the defaults.
-  const cam = state.shotCam || {};
-  if (player.inCar) {
-    const car = player.inCar;
-    const target = { x: car.pos.x, y: 1.6, z: car.pos.z };
-    render.updateCamera(target, car.heading, cam.pitch ?? 0.28, cam.dist ?? 10.5, dt, cam.offset ?? 0);
-  } else {
-    const target = { x: player.pos.x, y: 1.6, z: player.pos.z };
-    render.updateCamera(target, player.camYaw, cam.pitch ?? player.camPitch, cam.dist ?? 7.5, dt, cam.offset ?? 0);
-  }
-}
-
-function hudData() {
-  const waypoint = waypointOf(missions);
-  const m = currentMission(missions);
-  const targetPos = player.inCar ? player.inCar.pos : player.pos;
-  const targetHeading = player.inCar ? player.inCar.heading : player.heading;
-  let nearestCop = Infinity;
-  for (const c of police.cars) nearestCop = Math.min(nearestCop, Math.hypot(c.pos.x - targetPos.x, c.pos.z - targetPos.z));
-  const starCount = stars();
-  // v5 (g7): gear is derived from signed speed only — R / N / 1..5.
-  let gear = 'N';
-  if (player.inCar) {
-    const s = player.inCar.speed;
-    const kmh = carSpeedKmh(player.inCar);
-    gear = s < -0.5 ? 'R' : Math.abs(s) < 0.5 ? 'N' : String(1 + Math.min(4, Math.floor(kmh / 32)));
-  }
-  return {
-    money: state.money,
-    stars: starCount,
-    health: Math.round(state.health),
-    clockMin: state.clockMin,
-    speedKmh: player.inCar ? carSpeedKmh(player.inCar) : 0,
-    inCar: !!player.inCar,
-    ammo: combat.ammo,
-    magSize: combat.magSize,
-    // v5.1 (P5): per-weapon slot readouts — the HUD shows both guns' real
-    // ammunition, not just the active one's.
-    weapon: combat.weapon,
-    smgUnlocked: combat.smgUnlocked,
-    pistolAmmo: combat.weapon === 'pistol' ? combat.ammo : combat.stash.pistol,
-    pistolMag: WEAPONS.pistol.magSize,
-    smgAmmo: combat.weapon === 'smg' ? combat.ammo : combat.stash.smg,
-    smgMag: WEAPONS.smg.magSize,
-    missionTitle: `${m.title} — ${m.giver}`,
-    objective: missionText(missions),
-    message: state.message,
-    messageTimer: state.messageTimer,
-    player: { x: player.pos.x, z: player.pos.z, heading: player.inCar ? player.inCar.heading : player.heading },
-    police: police.cars.map((c) => ({
-      x: c.pos.x, z: c.pos.z,
-      callsign: c.callsign || '—',
-      dist: Math.round(Math.hypot(c.pos.x - targetPos.x, c.pos.z - targetPos.z)),
-      status: policeStatus(c, targetPos, targetHeading),
-    })),
-    traffic: traffic.cars.slice(0, 12).map((c) => ({ x: c.pos.x, z: c.pos.z })),
-    waypoint,
-    // --- v5 HUD contract additions (PLAN §2-g) ---
-    day: state.day,
-    // IN SIGHT is a plain range read (nearest cruiser ≤45 m), nothing more.
-    seen: starCount > 0 && nearestCop <= 45,
-    chapter: Math.min(missions.index + 1, MISSIONS.length),
-    stepIndex: missions.step,
-    stepCount: m.steps.length,
-    nextText: nextStepText(missions),
-    // Display countdown from the mission's reference budget; zero changes
-    // nothing (PLAN §5.3) — see missions.js stepStartedAt.
-    missionTimerSec: missions.done || !m.timerSec ? null : Math.max(0, Math.ceil(m.timerSec - (state.time - missions.stepStartedAt))),
-    distToWaypoint: waypoint ? Math.round(Math.hypot(waypoint.x - targetPos.x, waypoint.z - targetPos.z)) : null,
-    heliActive: heli.active,
-    district: districtOf(targetPos.x, targetPos.z),
-    stamina: Math.round(player.stamina ?? 100),
-    respect: missions.index * 3 + (missions.done ? 4 : 0) + Math.floor(state.money / 500),
-    carModel: player.inCar ? (NAMES.cars[player.inCar.police ? 'police' : player.inCar.kind] || NAMES.cars.sedan) : '',
-    carCondition: player.inCar ? Math.round(player.inCar.condition ?? 100) : 0,
-    gear,
-    dialog: state.dialog,
-    radio: {
-      songIndex: Math.floor(state.time / RADIO.songSec) % RADIO.songs.length,
-      progress: (state.time % RADIO.songSec) / RADIO.songSec,
-    },
-    // Minimap search-zone inputs (g3): centre follows the player.
-    searchR: starCount > 0 ? 55 + starCount * 15 : 0,
-  };
-}
-
-function handleActions() {
-  const actions = input.takeActions();
-  if (actions & ACTION_CONFIRM) {
-    if (state.screen === 'start') startGame();
-    else if (state.screen === 'busted') restart();
-    else if (state.screen === 'paused') {
-      state.screen = 'play';
-      hud.showScreen('play');
     }
   }
-  if (actions & ACTION_PAUSE) {
-    if (state.screen === 'play') {
-      state.screen = 'paused';
-      hud.showScreen('paused');
-      announce('Paused.');
-    } else if (state.screen === 'paused') {
-      state.screen = 'play';
-      hud.showScreen('play');
-    }
-  }
-  if (state.screen !== 'play') return;
-  if (actions & ACTION_ENTER_CAR) {
+  if (input.take('enter')) {
     if (player.inCar) exitCar();
-    else enterCar();
+    else { const c = nearestCar(); if (c) enterCar(c); }
   }
-  if (actions & ACTION_PUNCH && !player.inCar) {
-    audio.punch();
-    tryPunch(combat, player, peds, state);
-  }
-  if (actions & ACTION_WEAPON_PISTOL) switchWeapon(combat, 'pistol');
-  if (actions & ACTION_WEAPON_SMG) switchWeapon(combat, 'smg');
-  if (actions & ACTION_SHOOT) fireOnce();
-  // v5.1 (P5): the SMG is automatic — it keeps firing while the mouse
-  // trigger is held (the pistol stays one round per click). The combat
-  // fire-rate gate paces the shots; a silent attempt makes no sound.
-  if (input.isShootHeld() && combat.weapon === 'smg' && !player.inCar) fireOnce();
-  if (actions & ACTION_RELOAD) {
-    combat.reloadTimer = 1.4;
-    combat.ammo = combat.magSize;
-  }
-}
-
-function fireOnce() {
-  const origin = { x: player.pos.x, z: player.pos.z };
-  const dir = { x: Math.sin(player.camYaw), z: Math.cos(player.camYaw) };
-  if (tryShoot(combat, origin, dir, peds, police.cars, state)) audio.shoot();
-}
-
-// Test hooks: the headless play-test drives the game through these.
-window.__game = {
-  state, player, missions, police, traffic, peds, combat, world, heli,
-  stars, enterCar, exitCar, startGame, bust,
-  shotReady: false,
-};
-
-function runShot(name) {
-  const scene = stageShot(name, { state, player, traffic, peds, police, missions, combat, world, render, rng, heli });
-  player.mesh.position.set(player.pos.x, 0, player.pos.z);
-  player.mesh.rotation.y = player.inCar ? player.inCar.heading : player.heading;
-  player.mesh.visible = name !== 'start' && !player.inCar;
-  updateCamera(1); // snap the chase camera to its target: a shot gets 4 paints, not 400 frames to converge
-  let painted = 0;
-  function paint() {
-    updateCamera(1 / 60);
-    hud.update(hudData());
-    render.draw();
-    painted += 1;
-    if (painted < 4) requestAnimationFrame(paint);
+  // weapons
+  if (input.take('weapon1')) combat.switchTo('pistol');
+  if (input.take('weapon2')) combat.switchTo('smg');
+  if (input.take('reload')) { combat.startReload(); audio.reload(); }
+  const firing = !player.inCar && input.aim.down;
+  const targets = [];
+  for (const c of police.cars) targets.push({ pos: c.pos, radius: 1.8, car: c, police: true });
+  for (const c of traffic.all) if (!c.playerDriven) targets.push({ pos: c.pos, radius: 1.8, car: c });
+  for (const p of peds.list) targets.push({ pos: p.pos, radius: 0.7, ped: p });
+  const shot = combat.update(dt, firing, { origin: player.pos, aimYaw: player.camYaw, targets });
+  if (shot) {
+    if (shot.type === 'dry') audio.dryFire();
     else {
-      window.__shotReady = true;
-      window.__game.shotReady = true;
-    }
-  }
-  hud.showScreen(scene.screen);
-  announce(scene.announce);
-  requestAnimationFrame(paint);
-}
-
-function runGame() {
-  load();
-  combat.smgUnlocked = missions.index >= 2; // v5.1 (P5): a restored CH3+ save keeps Rosa's SMG
-  hud.showScreen('start');
-  announce('Palmera City. Press Space or click to start.');
-  let accumulator = 0;
-  let last = performance.now();
-  function frame(now) {
-    requestAnimationFrame(frame);
-    accumulator += Math.min((now - last) / 1000, MAX_FRAME);
-    last = now;
-    handleActions();
-    if (state.screen === 'play') {
-      while (accumulator >= STEP) {
-        step(STEP);
-        accumulator -= STEP;
-        if (state.screen !== 'play') break;
-      }
-    } else {
-      accumulator = 0;
-      if (state.screen === 'start') {
-        // Idle attract mode: slow orbit around the beach spawn.
-        const t = performance.now() / 1000;
-        player.camYaw = Math.PI + Math.sin(t * 0.1) * 0.4;
+      audio.shot(combat.weapon === 'smg');
+      if (shot.type === 'hit') {
+        addHeat(CRIME_HEAT.shotHit);
+        if (shot.target.ped) shot.target.ped.fall();
+        if (shot.target.police) setMessage('You hit a cruiser!');
       }
     }
-    updateCamera(1 / 60);
-    hud.update(hudData());
-    render.draw();
   }
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden && state.screen === 'play') {
-      state.screen = 'paused';
-      hud.showScreen('paused');
-    }
+  // wanted decay + police + heli
+  state.heat = Math.max(0, state.heat - HEAT_DECAY * dt);
+  const spd = player.inCar ? player.inCar.speed : 0;
+  police.step(dt, {
+    target: player.pos,
+    targetHeading: player.inCar ? player.inCar.heading : player.heading,
+    targetSpeed: spd, stars: stars(), time: state.time,
+    onRam: () => {
+      state.health -= 8; state.lastDamageAt = state.time;
+      if (player.inCar) { player.inCar.speed *= 0.55; player.inCar.condition = Math.max(5, player.inCar.condition - 4); }
+      audio.crash(false);
+    },
   });
-  requestAnimationFrame(frame);
+  heli.step(dt, player.pos, stars(), state.time);
+  traffic.step(dt, player.pos, state.time);
+  const threat = (stars() > 0 || combat.tracerTimer > 0) ? player.pos : null;
+  peds.step(dt, threat);
+  // bust / wasted
+  if (state.health <= 0) { bust('wasted'); return; }
+  if (stars() >= 1) {
+    const near = police.cars.some((c) => Math.hypot(c.pos.x - player.pos.x, c.pos.z - player.pos.z) < 4.5);
+    if (near && Math.abs(spd) < 1.5) state.bustTimer += dt; else state.bustTimer = Math.max(0, state.bustTimer - dt * 2);
+    if (state.bustTimer > 2.5) { bust('busted'); return; }
+  } else state.bustTimer = 0;
+  if (state.time - state.lastDamageAt > 4) state.health = Math.min(100, state.health + 1.5 * dt);
+  // missions
+  const events = missions.update(dt, { pos: player.pos, inCar: !!player.inCar, stars: stars(), seen: seen() });
+  for (const ev of events) {
+    if (ev.type === 'chapterDone') {
+      state.money += ev.reward;
+      audio.cash();
+      if (ev.index === MISSIONS.length - 1) { setMessage(`Paper Trail complete — +$${ev.reward}`); setDialog(DIALOG.all_done, 7); }
+      else if (ev.index === 3) { setMessage(`Debt paid! ${ev.title} complete — +$${ev.reward}`); setDialog(DIALOG.mission_done, 6); }
+      else setMessage(`${ev.title} complete — +$${ev.reward}`);
+      state.chapterTime = 0;
+      save();
+    } else if (ev.type === 'chapterStart') {
+      state.chapterTime = 0;
+      const key = dialogKeyForChapter(ev.index);
+      if (ev.index === 2) { // Rosa's gift arrives as CH3 opens
+        combat.unlockedSmg = true;
+        setDialog(DIALOG.m5_gift, 7);
+      } else if (key) setDialog(DIALOG[key], 6);
+    } else if (ev.type === 'stepDone') {
+      setMessage('Step complete');
+      if (ev.index === 2 && ev.step === 1) setDialog(DIALOG.m3_heat, 6);
+    }
+  }
+  // beacon, dialog & message timers, autosave
+  const wp = missions.waypoint();
+  beacon.set(wp ? wp.x : 0, wp ? wp.z : 0, !!wp);
+  beacon.step(state.time);
+  if (state.dialogTimer > 0) { state.dialogTimer -= dt; if (state.dialogTimer <= 0) state.dialog = null; }
+  if (state.messageTimer > 0) { state.messageTimer -= dt; if (state.messageTimer <= 0) state.message = ''; }
+  state.saveTimer += dt;
+  if (state.saveTimer > 5) { state.saveTimer = 0; save(); }
+  audio.setSiren(stars() > 0 && police.cars.length > 0,
+    police.cars.length ? clamp(Math.hypot(police.cars[0].pos.x - player.pos.x, police.cars[0].pos.z - player.pos.z) / 90, 0, 1) : 1);
+  audio.stepRadio(dt, !!player.inCar);
 }
 
-if (shot) runShot(shot);
-else runGame();
+// ---------- HUD data ----------
+function hudData() {
+  const s = stars();
+  const c = missions.current();
+  const stepDef = missions.currentStep();
+  const wp = missions.waypoint();
+  const car = player.inCar;
+  const kmh = car ? Math.abs(car.speed) * 3.6 : 0;
+  return {
+    money: state.money, stars: s, seen: seen(), health: Math.round(state.health),
+    armor: car ? Math.round(car.condition) : null,
+    stamina: Math.round(player.stamina), respect: respect(),
+    clockMin: state.clockMin, day: state.day, time: state.time,
+    mission: {
+      chapter: missions.index + 1, title: missions.done ? 'Free Roam' : (c ? c.title : 'Free Roam'),
+      objective: missions.done ? 'Palmera is yours — the debt is settled.' : (stepDef ? stepDef.text : ''),
+      sub: wp ? `· ${Math.round(Math.hypot(wp.x - player.pos.x, wp.z - player.pos.z))} m` :
+        (stepDef && stepDef.type === 'evade' ? 'Break line of sight until the stars fade' : ''),
+      nextText: missions.nextStepText(),
+      stepIndex: missions.step, stepCount: c ? c.steps.length : 1,
+      timerSec: c ? Math.max(0, c.timerSec - state.chapterTime) : null, done: missions.done,
+    },
+    police: police.cars.map((pc) => ({
+      callsign: pc.callsign || 'UNIT',
+      dist: Math.round(Math.hypot(pc.pos.x - player.pos.x, pc.pos.z - player.pos.z)),
+      status: policeStatus(pc, player.pos),
+    })).sort((a, b) => (a.status === 'ROADBLOCK' ? 0 : 1) - (b.status === 'ROADBLOCK' ? 0 : 1)),
+    heliActive: heli.active,
+    dialog: state.dialog, inCar: !!car,
+    carModel: car ? KINDS[car.kind].name : '', carCondition: car ? Math.round(car.condition) : 100,
+    speedKmh: kmh, gear: !car ? 'N' : car.speed < -0.5 ? 'R' : Math.abs(car.speed) < 0.5 ? 'N' : String(1 + Math.min(4, Math.floor(kmh / 32))),
+    weapon: { slot: WEAPONS[combat.weapon].slot, label: WEAPONS[combat.weapon].label, ammo: combat.ammo },
+    smgUnlocked: combat.unlockedSmg,
+    radio: { songIndex: ((Math.floor(state.time / RADIO.songSec) % RADIO.songs.length) + RADIO.songs.length) % RADIO.songs.length, progress: (state.time % RADIO.songSec) / RADIO.songSec },
+    player: { x: player.pos.x, z: player.pos.z, heading: car ? car.heading : player.heading },
+    policePos: police.cars.map((pc) => ({ x: pc.pos.x, z: pc.pos.z })),
+    trafficPos: traffic.all.slice(0, 16).map((tc) => ({ x: tc.pos.x, z: tc.pos.z })),
+    waypoint: wp, searchR: 55 + s * 15,
+    district: districtOf(player.pos.x, player.pos.z),
+    message: state.message,
+  };
+}
+
+// ---------- boot, staging hooks, loop ----------
+const shotInfo = readShotParam();
+if (!shotInfo.shot) load();
+const gameApi = {
+  state, player, missions, police, traffic, peds, combat, world, heli,
+  stars, enterCar, exitCar, startGame, bust: () => bust('busted'),
+};
+window.__game = gameApi;
+window.__palmera = {
+  money: () => state.money,
+  speed: () => (player.inCar ? player.inCar.speed : 0),
+  chapter: () => missions.index,
+  stars, heat: () => state.heat,
+  busts: () => state.busts,
+  pos: () => ({ x: player.pos.x, z: player.pos.z }),
+  screen: () => state.screen,
+};
+if (shotInfo.shot) {
+  stageShot(gameApi, shotInfo.shot);
+  if (shotInfo.shot === 'start') hud.showScreen('start');
+} else if (shotInfo.play) startGame();
+else { hud.showScreen('start'); setDialogSafe(); }
+function setDialogSafe() { if (missions.index === 0) { state.dialog = DIALOG.m1_start; state.dialogTimer = 999; } }
+input.setTouchVisible(false);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && state.screen === 'play') {
+    state.screen = 'pause'; hud.showScreen('pause'); input.setTouchVisible(false);
+  }
+});
+
+let last = performance.now();
+let framesRendered = 0;
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dtMs = now - last; last = now;
+  render.adapt(dtMs);
+  // Sub-stepped variable dt: the FULL frame time is simulated (in
+  // <= 1/30 s slices) so game time tracks wall time even when the
+  // renderer crawls — wanted decay and timers are wall-clock contracts.
+  const dt = Math.min(1.2, Math.max(0, dtMs / 1000)); // rAF timestamps can predate module-eval time on frame one
+  const n = Math.max(1, Math.ceil(dt / 0.0333));
+  const h = dt / n;
+  for (let i = 0; i < n; i += 1) step(h);
+  // camera
+  if (state.screen === 'start' && !shotInfo.shot) {
+    render.orbit(state.time + performance.now() / 1000, 0, 150, 64, 25);
+  } else if (player.inCar) {
+    const sc = state.shotCam || { dist: 9.5, pitch: 0.24 };
+    render.follow(dt, { pos: { x: player.inCar.pos.x, z: player.inCar.pos.z, y: 0.6 }, heading: player.inCar.heading, dist: sc.dist, pitch: sc.pitch, inCar: true, lookAhead: 8 });
+  } else {
+    const sc = state.shotCam || { dist: 7, pitch: player.camPitch };
+    render.follow(dt, { pos: { x: player.pos.x, z: player.pos.z, y: 0.9 }, heading: player.camYaw, dist: sc.dist, pitch: sc.pitch, inCar: false, lookAhead: 7 });
+  }
+  hud.update(hudData());
+  render.render();
+  framesRendered += 1;
+  if (shotInfo.shot && framesRendered >= 6) window.__shotReady = true;
+}
+requestAnimationFrame(frame);
+export { CITY };
