@@ -2,15 +2,13 @@
 // for the car ahead. Parked cars line the kerbs for the player to steal. Each
 // traffic car owns a car object from vehicles.js and a simple route state.
 import { createCar, syncCarMesh } from './vehicles.js';
-import { CITY, PALETTE } from './config.js';
+import { CITY, PALETTE, SUNSET } from './config.js';
 import { roadCentres, isOnRoad } from './world.js';
 
 // v2: pick a body style for ambient traffic (shots stage their own kinds).
-// v3 R2: a small sport share joins the fleet, so the hero kind also exists
-// in live traffic for the player to steal. Still exactly one rng draw.
 function pickKind(rng) {
   const r = rng.next();
-  return r < 0.5 ? 'sedan' : r < 0.72 ? 'hatch' : r < 0.92 ? 'van' : 'sport';
+  return r < 0.55 ? 'sedan' : r < 0.8 ? 'hatch' : 'van';
 }
 
 // Stage one moving traffic car at an exact spot (used by shots.js to put
@@ -61,7 +59,17 @@ export function createTraffic(scene, rng, world) {
     const x = horizontal ? along : road + side * (CITY.roadHalf - 1.5);
     const z = horizontal ? road + side * (CITY.roadHalf - 1.5) : along;
     const heading = horizontal ? (side > 0 ? Math.PI / 2 : -Math.PI / 2) : side > 0 ? 0 : Math.PI;
-    const car = createCar(scene, x, z, heading, rng.pick(PALETTE.carColors), false, pickKind(rng));
+    // v5 (c3): the FIRST parked car is always the hero sport, parked by the
+    // spawn kerb in Rosa Neón — stealable like any other car; the sport kind
+    // exists nowhere else in free play (PLAN Lampiran A.5).
+    const isHero = i === 0;
+    const car = createCar(scene, x, z, heading, isHero ? SUNSET.heroColor : rng.pick(PALETTE.carColors), false, isHero ? 'sport' : pickKind(rng));
+    if (isHero) {
+      car.pos.x = 5.6;
+      car.pos.z = 178;
+      car.heading = Math.PI;
+      syncCarMesh(car);
+    }
     car.parked = true;
     car.driver = null;
     parked.push(car);
@@ -73,7 +81,6 @@ export function stepTraffic(traffic, dt, world, playerCar) {
   const centres = roadCentres();
   const half = world.half;
   for (const car of traffic.cars) {
-    car.t = (car.t || 0) + dt; // simulation clock for the glow pulse
     // Slow for the car ahead (any car within 10 m in front).
     let ahead = false;
     for (const other of traffic.all) {

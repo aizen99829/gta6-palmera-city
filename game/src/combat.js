@@ -1,12 +1,35 @@
-// Combat: fists and a pistol. Punch (F) knocks down the nearest pedestrian in
-// reach and lifts a little cash; shooting (click) is a hitscan shot toward the
-// camera's aim — the nearest pedestrian or police cruiser in the cone takes the
-// hit. Both raise the wanted heat; the HUD ammo counter reads from here.
+// Combat: fists and two guns. Punch (F) knocks down the nearest pedestrian
+// in reach and lifts a little cash; shooting is a hitscan shot toward the
+// camera's aim — the nearest pedestrian or police cruiser in the cone
+// takes the hit. Both raise the wanted heat; the HUD ammo counter reads
+// from here. v5.1 (P5): the pistol (key 2) is joined by a real SMG
+// (key 3, Rosa's gift when CH3 opens) — automatic fire, a 32-round
+// magazine, weaker per-round cruiser slow. `ammo`/`magSize` always
+// describe the ACTIVE weapon; the other's rounds wait in `stash`.
 import { nearestPed } from './pedestrians.js';
-import { MONEY, WANTED } from './config.js';
+import { MONEY, WANTED, WEAPONS } from './config.js';
 
 export function createCombat() {
-  return { ammo: 12, magSize: 12, reloadTimer: 0, flash: 0, lastShot: '', tracerFrom: null, tracerTo: null };
+  return {
+    weapon: 'pistol',
+    ammo: WEAPONS.pistol.magSize,
+    magSize: WEAPONS.pistol.magSize,
+    stash: { pistol: WEAPONS.pistol.magSize, smg: WEAPONS.smg.magSize },
+    smgUnlocked: false,
+    fireTimer: 0,
+    reloadTimer: 0, flash: 0, lastShot: '', tracerFrom: null, tracerTo: null,
+  };
+}
+
+export function switchWeapon(combat, name) {
+  if (!WEAPONS[name] || name === combat.weapon) return false;
+  if (name === 'smg' && !combat.smgUnlocked) return false;
+  combat.stash[combat.weapon] = combat.ammo;
+  combat.weapon = name;
+  combat.magSize = WEAPONS[name].magSize;
+  combat.ammo = combat.stash[name];
+  combat.fireTimer = Math.max(combat.fireTimer, 0.25); // the swap itself takes a beat
+  return true;
 }
 
 export function tryPunch(combat, player, peds, state) {
@@ -24,8 +47,12 @@ export function tryPunch(combat, player, peds, state) {
   state.messageTimer = 2;
 }
 
+// Returns true when a round actually left the barrel (the caller plays
+// the shot sound only then — the SMG's automatic fire depends on it).
 export function tryShoot(combat, origin, dir, peds, policeCars, state) {
-  if (combat.reloadTimer > 0 || combat.ammo <= 0) return;
+  if (combat.reloadTimer > 0 || combat.ammo <= 0 || combat.fireTimer > 0) return false;
+  const gun = WEAPONS[combat.weapon] || WEAPONS.pistol;
+  combat.fireTimer = gun.interval;
   combat.ammo -= 1;
   combat.flash = 0.12;
   let best = null;
@@ -57,7 +84,7 @@ export function tryShoot(combat, origin, dir, peds, policeCars, state) {
     state.message = 'Shot fired — the PD heard that';
     state.messageTimer = 2;
   } else if (bestKind === 'police') {
-    best.speed *= 0.4;
+    best.speed *= gun.cruiserSlow; // pistol 0.4 (one hard hit), SMG 0.82 (sustained fire)
     state.heat = Math.min(100, state.heat + WANTED.shoot);
     state.message = 'You hit a cruiser!';
     state.messageTimer = 2;
@@ -74,10 +101,12 @@ export function tryShoot(combat, origin, dir, peds, policeCars, state) {
     combat.reloadTimer = 1.4;
     combat.ammo = combat.magSize;
   }
+  return true;
 }
 
 export function stepCombat(combat, dt) {
   combat.flash = Math.max(0, combat.flash - dt);
+  combat.fireTimer = Math.max(0, combat.fireTimer - dt);
   if (combat.reloadTimer > 0) {
     combat.reloadTimer -= dt;
     if (combat.reloadTimer <= 0) combat.ammo = combat.magSize;

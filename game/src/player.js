@@ -15,9 +15,15 @@ export function createPlayer(scene) {
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.28, 12, 10), skin);
   head.position.y = 1.75;
   group.add(head);
-  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.29, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x1a1210 }));
+  // v5.1 (P4): her hair is the dark pink of her HUD portrait (was plain
+  // black), plus the portrait's gold hoop earring and white sneakers —
+  // cheap focal detail on the one character the camera lives behind.
+  const hair = new THREE.Mesh(new THREE.SphereGeometry(0.29, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x4a1030 }));
   hair.position.y = 1.78;
   group.add(hair);
+  const earring = new THREE.Mesh(new THREE.SphereGeometry(0.05, 6, 5), new THREE.MeshBasicMaterial({ color: 0xffd94a }));
+  earring.position.set(0.29, 1.62, 0);
+  group.add(earring);
   const legGeo = new THREE.BoxGeometry(0.26, 0.75, 0.3);
   const legL = new THREE.Mesh(legGeo, pants);
   legL.position.set(-0.18, 0.38, 0);
@@ -25,6 +31,13 @@ export function createPlayer(scene) {
   const legR = new THREE.Mesh(legGeo, pants);
   legR.position.set(0.18, 0.38, 0);
   group.add(legR);
+  // v5.1 (P4): white sneakers ride the legs so they follow the walk swing.
+  const shoeMat = new THREE.MeshLambertMaterial({ color: 0xf2ede4 });
+  for (const leg of [legL, legR]) {
+    const shoe = new THREE.Mesh(new THREE.BoxGeometry(0.27, 0.12, 0.42), shoeMat);
+    shoe.position.set(0, -0.36, 0.05);
+    leg.add(shoe);
+  }
   const armGeo = new THREE.BoxGeometry(0.2, 0.7, 0.24);
   const armL = new THREE.Mesh(armGeo, shirt);
   armL.position.set(-0.48, 1.15, 0);
@@ -55,10 +68,17 @@ export function createPlayer(scene) {
     moving: false,
     inCar: null,
     punchTimer: 0,
+    // v5 (g4): stamina is a real, local display state — it drains while
+    // sprinting and refills at rest, but running out NEVER slows Luz in
+    // v5 (recorded design debt in PLAN §2-g4, not a bug).
+    stamina: 100,
   };
 }
 
 export function stepPlayer(player, input, dt, world) {
+  // v5 (g4): stamina bookkeeping (display only — see createPlayer note).
+  if (input.held.run && player.moving) player.stamina = Math.max(0, player.stamina - 22 * dt);
+  else player.stamina = Math.min(100, player.stamina + 16 * dt);
   const drag = input.takeDrag();
   player.camYaw -= drag.x * 0.004;
   player.camPitch = Math.max(-0.1, Math.min(1.1, player.camPitch + drag.y * 0.003));
