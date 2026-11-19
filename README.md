@@ -1,6 +1,8 @@
 # Palmera City
 
-[![make.fun bounty](https://img.shields.io/badge/make.fun-bounty-ff6b9d)](https://make.fun/bounty/gta6-01)
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/aizen99829/gta6-palmera-city/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/aizen99829/gta6-palmera-city/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
 An original open-world driving game set in a sunset-drenched coastal
 city, built with Three.js and procedural canvas art — no downloaded
